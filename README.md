@@ -117,6 +117,60 @@ This checks your Python version, dependency imports, Abacus.AI connectivity
 
 ---
 
+## 🎙️ Voice pipeline (local-first)
+
+MimOSA's entire voice stack runs **on-device** — spoken audio never leaves your
+machine. Only (optional) LLM calls go to the cloud.
+
+```
+  IDLE ──(wake word)──▶ LISTENING ──(speech)──▶ PROCESSING ──(reply)──▶ SPEAKING ──▶ IDLE
+   │                                                                                  ▲
+   └──────────────────────────────────────────────────────────────────────────────-─┘
+```
+
+| Stage | Backend | Notes |
+|-------|---------|-------|
+| Wake word | [Porcupine](https://picovoice.ai/) | Dependency-free **energy fallback** if no key/package |
+| Speech-to-text | [OpenAI Whisper](https://github.com/openai/whisper) | Fully local; model set by `WHISPER_MODEL` |
+| Text-to-speech | [Piper](https://github.com/rhasspy/piper) | Fully local; voice set by `PIPER_VOICE` |
+
+### Voice configuration
+
+Set these in your `.env` (see `.env.example`):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WAKE_WORD` | `hey mimosa` | Activation phrase |
+| `PORCUPINE_ACCESS_KEY` | — | Picovoice key (optional; falls back to energy detector) |
+| `WHISPER_MODEL` | `base` | `tiny`/`base`/`small`/`medium`/`large` (+ `.en`) |
+| `PIPER_VOICE` | `en_US-lessac-medium` | Piper voice name or `.onnx` path |
+| `AUDIO_INPUT_DEVICE` | `default` | Mic device index or `default` |
+| `AUDIO_OUTPUT_DEVICE` | `default` | Speaker device index or `default` |
+
+### Trying it out
+
+```bash
+# Report which backends are available (no recording):
+python scripts/test_voice_loop.py --check
+
+# List audio devices:
+python scripts/test_voice_loop.py --list-devices
+
+# Single turn, push-to-talk (no wake word needed):
+python scripts/test_voice_loop.py --once --no-wake
+
+# Continuous, wake-word driven:
+python scripts/test_voice_loop.py
+```
+
+> **Heads-up:** On a headless VM (no microphone/speakers) the voice modules
+> import fine and the tester reports backends as unavailable instead of
+> crashing. Real voice I/O requires a desktop with audio hardware (e.g.
+> Kubuntu) and `sudo apt install portaudio19-dev`. See
+> [`docs/VOICE_PIPELINE.md`](docs/VOICE_PIPELINE.md) for the full guide.
+
+---
+
 ## 🧪 Running tests
 
 ```bash
