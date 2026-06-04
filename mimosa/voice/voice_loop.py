@@ -1,0 +1,297 @@
+"""The MimOSA voice loop: a state machine tying the local voice stack together.
+
+This module orchestrates the full **local-first** voice interaction cycle:
+
+    IDLE  --(wake word)-->  LISTENING  --(speech captured)-->  PROCESSING
+      ^                                                            |
+      |                                                            v
+   SPEAKING  <--------------------(response synthesized)----------+
+
+Concretely, one turn is:
+
+1. **IDLE** -- wait for the wake word (Porcupine or the energy fallback).
+2. **LISTENING** -- record the user's utterance until they stop talking
+   (:meth:`AudioManager.record_until_silence`).
+3. **PROCESSING** -- transcribe locally with Whisper, then hand the text to a
+   *response handler*. In M1.2 the default handler simply **echoes** the text
+   (no real LLM yet -- that arrives in a later milestone).
+4. **SPEAKING** -- synthesize the response locally with Piper and play it.
+
+Everything except the (future) LLM step happens on-device, honoring MimOSA's
+privacy guarantee that audio never leaves the machine.
+
+Design notes
+------------
+* Components are **injected** (wake word detector, STT, TTS, audio manager) so
+  the loop is easy to unit-test with mocks and so missing optional backends
+  degrade gracefully rather than crashing at import time.
+* All component construction is lazy/defensive: on a headless VM with no audio
+  or ML stack, you can still import and instantiate :class:`VoiceLoop`; errors
+  surface only when you actually call :meth:`run`/:meth:`run_once`.
+"""
+
+from __future__ import annotations
+
+import enum
+import logging
+import os
+from typing import Callable, Optional
+
+logger = logging.getLogger(__name__)
+
+# A response handler maps recognized user text -> MimOSA's reply text.
+ResponseHandler = Callable[[str], str]
+
+
+class VoiceState(enum.Enum):
+    """States of the voice interaction loop."""
+
+    IDLE = "idle"            # waiting for the wake word
+    LISTENING = "listening"  # recording the user's utterance
+    PROCESSING = "processing"  # transcribing + generating a response
+    SPEAKING = "speaking"    # playing the synthesized reply
+    STOPPED = "stopped"      # loop has been shut down
+
+
+def echo_response_handler(text: str) -> str:
+    """Default M1.2 response handler: echo the recognized text.
+
+    A real LLM-backed handler is introduced in a later milestone. Keeping this
+    trivial lets us validate the *audio* pipeline end-to-end in isolation.
+    """
+    if not text:
+        return "I didn't catch that. Could you say it again?"
+    return f"You said: {text}"
+
+
+class VoiceLoop:
+    """Coordinates wake word -> STT -> response -> TTS as a state machine.
+
+    Args:
+        audio_manager: Provides recording and playback. If ``None``, a default
+            :class:`~mimosa.voice.audio_manager.AudioManager` is created.
+        wake_word_detector: A :class:`~mimosa.voice.wake_word.BaseWakeWord`. If
+            ``None``, one is built via
+            :func:`~mimosa.voice.wake_word.create_wake_word_detector`.
+        stt: A speech-to-text engine exposing ``transcribe_pcm``. If ``None``,
+            a :class:`~mimosa.voice.stt.WhisperSTT` is created.
+        tts: A text-to-speech engine exposing ``synthesize``. If ``None``, a
+            :class:`~mimosa.voice.tts.PiperTTS` is created.
+        response_handler: Maps recognized text -> reply text. Defaults to
+            :func:`echo_response_handler`.
+        max_record_seconds: Safety cap on a single utterance recording.
+
+    Note:
+        Construction never imports heavy/optional backends; defaults are
+        constructed lazily and only *used* inside :meth:`run`/:meth:`run_once`.
+    """
+
+    def __init__(
+        self,
+        audio_manager=None,
+        wake_word_detector=None,
+        stt=None,
+        tts=None,
+        response_handler: Optional[ResponseHandler] = None,
+        max_record_seconds: float = 15.0,
+    ) -> None:
+        self._audio = audio_manager
+        self._wake = wake_word_detector
+        self._stt = stt
+        self._tts = tts
+        self.response_handler: ResponseHandler = response_handler or echo_response_handler
+        self.max_record_seconds = max_record_seconds
+
+        self._state = VoiceState.IDLE
+        self._stop_requested = False
+
+    # -- state -------------------------------------------------------------
+
+    @property
+    def state(self) -> VoiceState:
+        """The current :class:`VoiceState`."""
+        return self._state
+
+    def _set_state(self, state: VoiceState) -> None:
+        if state is not self._state:
+            logger.debug("Voice state: %s -> %s", self._state.value, state.value)
+            self._state = state
+
+    # -- lazy component accessors -----------------------------------------
+
+    @property
+    def audio(self):
+        """The :class:`AudioManager`, created on first access."""
+        if self._audio is None:
+            from mimosa.voice.audio_manager import AudioManager
+
+            self._audio = AudioManager()
+        return self._audio
+
+    @property
+    def wake(self):
+        """The wake-word detector, created on first access (never raises)."""
+        if self._wake is None:
+            from mimosa.voice.wake_word import create_wake_word_detector
+
+            wake_word = os.getenv("WAKE_WORD", "hey mimosa")
+            self._wake = create_wake_word_detector(wake_word)
+        return self._wake
+
+    @property
+    def stt(self):
+        """The Whisper STT engine, created on first access."""
+        if self._stt is None:
+            from mimosa.voice.stt import create_stt
+
+            self._stt = create_stt()
+        return self._stt
+
+    @property
+    def tts(self):
+        """The Piper TTS engine, created on first access."""
+        if self._tts is None:
+            from mimosa.voice.tts import create_tts
+
+            self._tts = create_tts()
+        return self._tts
+
+    # -- control -----------------------------------------------------------
+
+    def stop(self) -> None:
+        """Request the loop to stop after the current turn.
+
+        Safe to call from another thread or a signal handler.
+        """
+        logger.info("Voice loop stop requested.")
+        self._stop_requested = True
+
+    # -- core turn ---------------------------------------------------------
+
+    def run_once(self, wait_for_wake: bool = True) -> Optional[str]:
+        """Execute a single interaction turn and return the reply text.
+
+        Steps: (optionally) wait for the wake word, record until silence,
+        transcribe, generate a response, and speak it.
+
+        Args:
+            wait_for_wake: If ``True``, block until the wake word fires before
+                recording. If ``False``, start recording immediately (useful
+                for push-to-talk or testing).
+
+        Returns:
+            The reply text that was spoken, or ``None`` if the turn was aborted
+            (e.g. stop requested, or no speech captured).
+        """
+        if wait_for_wake:
+            if not self._await_wake_word():
+                return None
+
+        # LISTENING: capture the user's utterance.
+        self._set_state(VoiceState.LISTENING)
+        try:
+            pcm = self.audio.record_until_silence(max_seconds=self.max_record_seconds)
+        except Exception as exc:
+            logger.error("Recording failed: %s", exc)
+            self._set_state(VoiceState.IDLE)
+            return None
+
+        if not pcm:
+            logger.info("No speech captured; returning to idle.")
+            self._set_state(VoiceState.IDLE)
+            return None
+
+        # PROCESSING: transcribe + generate response.
+        self._set_state(VoiceState.PROCESSING)
+        try:
+            text = self.stt.transcribe_pcm(pcm, sample_rate=self.audio.sample_rate)
+        except Exception as exc:
+            logger.error("Transcription failed: %s", exc)
+            self._set_state(VoiceState.IDLE)
+            return None
+
+        logger.info("Recognized: %r", text)
+        try:
+            reply = self.response_handler(text)
+        except Exception as exc:
+            logger.error("Response handler failed: %s", exc)
+            reply = "Sorry, something went wrong while processing that."
+
+        # SPEAKING: synthesize + play the reply.
+        self._speak(reply)
+
+        self._set_state(VoiceState.IDLE)
+        return reply
+
+    def run(self) -> None:
+        """Run the loop continuously until :meth:`stop` is called.
+
+        Each iteration is a full turn (wake -> listen -> process -> speak).
+        Exceptions in a single turn are logged and the loop continues, so a
+        transient audio glitch won't kill the assistant.
+        """
+        self._stop_requested = False
+        logger.info("Voice loop starting. Say the wake word to begin.")
+        try:
+            while not self._stop_requested:
+                try:
+                    self.run_once(wait_for_wake=True)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:  # keep the loop alive on per-turn errors
+                    logger.exception("Unhandled error during voice turn: %s", exc)
+                    self._set_state(VoiceState.IDLE)
+        except KeyboardInterrupt:
+            logger.info("Voice loop interrupted by user.")
+        finally:
+            self._set_state(VoiceState.STOPPED)
+            self.shutdown()
+
+    # -- helpers -----------------------------------------------------------
+
+    def _await_wake_word(self) -> bool:
+        """Block in IDLE until the wake word fires. Returns False if stopped."""
+        self._set_state(VoiceState.IDLE)
+        detected = {"hit": False}
+
+        def _on_detected() -> None:
+            detected["hit"] = True
+
+        try:
+            self.wake.listen(
+                self.audio,
+                on_detected=_on_detected,
+                should_stop=lambda: self._stop_requested or detected["hit"],
+            )
+        except Exception as exc:
+            logger.error("Wake-word listening failed: %s", exc)
+            return False
+
+        return detected["hit"] and not self._stop_requested
+
+    def _speak(self, reply: str) -> None:
+        """Synthesize ``reply`` with TTS and play it; degrade gracefully."""
+        if not reply:
+            return
+        self._set_state(VoiceState.SPEAKING)
+        try:
+            wav_bytes = self.tts.synthesize(reply)
+            self.audio.play_wav_bytes(wav_bytes)
+        except Exception as exc:
+            # TTS/playback failures should not crash the loop -- log the reply
+            # so the interaction is still observable in text.
+            logger.error("Speech output failed (%s). Reply was: %r", exc, reply)
+
+    def shutdown(self) -> None:
+        """Release backend resources (audio, wake-word engine)."""
+        try:
+            if self._wake is not None:
+                self._wake.delete()
+        except Exception:  # pragma: no cover - best effort cleanup
+            pass
+        try:
+            if self._audio is not None:
+                self._audio.close()
+        except Exception:  # pragma: no cover - best effort cleanup
+            pass
+        logger.info("Voice loop shut down.")
