@@ -171,6 +171,80 @@ python scripts/test_voice_loop.py
 
 ---
 
+## 🧠 Intent system (routing & skills)
+
+Once your words are transcribed, MimOSA decides **what you want** and hands the
+request to the right *skill*. To keep things fast, private, and cheap, routing
+is **hybrid**:
+
+```
+  text ─▶ Tier 1: local regex heuristics ─▶ (confident?) ─▶ skill
+                       │ no                              ▲
+                       ▼                                 │
+            Tier 1b: question-shape check ───────────────┤
+                       │ no                               │
+                       ▼                                  │
+            Tier 2: LLM classification ──────────────────┘
+```
+
+* **Tier 1 (local, zero-cost):** regex heuristics catch time, date, math,
+  weather, and greetings instantly — **no LLM call**.
+* **Tier 1b:** question-shaped utterances (who/what/why… or ending in `?`) are
+  routed straight to the question skill, which needs the LLM to *answer*
+  anyway — so we skip a redundant classification call.
+* **Tier 2 (LLM):** only genuinely ambiguous input is sent to the LLM for
+  classification. Low-confidence results fall back to the general question
+  skill.
+
+### Skills
+
+| Intent | Skill | LLM? | What it does |
+|--------|-------|:----:|--------------|
+| `time` / `date` | `TimeSkill` | ❌ local | Current time, date, day of week |
+| `calculator` / `math` | `CalculatorSkill` | ❌ local | Safe arithmetic (AST allow-list, **no `eval`**) |
+| `weather` | `WeatherSkill` | ❌ local | Live conditions via [wttr.in](https://wttr.in) (no API key) |
+| `greeting` / `chitchat` | `GreetingSkill` | ✅ cloud | Friendly small talk (local fallback if offline) |
+| `question` | `QuestionSkill` | ✅ cloud | General-knowledge Q&A, concise & voice-friendly |
+
+> **Privacy:** local skills never touch the network. LLM-backed skills send
+> only the **transcribed text** — never audio. Every skill degrades gracefully:
+> a failure returns a spoken apology, never an unhandled crash.
+
+### Intent configuration
+
+Set these in your `.env` (see `.env.example`):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `INTENT_CONFIDENCE_THRESHOLD` | `0.7` | Below this, route to the question skill |
+| `MAX_CONVERSATION_HISTORY` | `10` | Turns of context kept for LLM skills |
+| `DEFAULT_LOCATION` | — | Fallback city for weather when none is said |
+| `WEATHER_API_KEY` | — | Reserved (wttr.in needs none today) |
+
+### Trying it out
+
+```bash
+# Run example utterances for every intent type (uses the real LLM if available):
+python scripts/test_intents.py --demo
+
+# Interactive: type utterances and see classification + reply:
+python scripts/test_intents.py
+
+# Check the router + LLM are reachable:
+python scripts/test_intents.py --check
+
+# Full pipeline, simulated (no microphone needed — type instead of speak):
+python scripts/test_full_loop.py --simulate
+
+# Full pipeline on a real desktop (wake word ▶ STT ▶ intent ▶ LLM ▶ TTS):
+python scripts/test_full_loop.py --once
+```
+
+See [`docs/INTENT_SYSTEM.md`](docs/INTENT_SYSTEM.md) for the full design,
+extension guide, and troubleshooting.
+
+---
+
 ## 🧪 Running tests
 
 ```bash
