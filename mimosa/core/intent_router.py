@@ -52,6 +52,7 @@ from typing import Dict, List, Optional
 from mimosa.llm.base_provider import LLMError, Message, Role
 from mimosa.skills.base_skill import BaseSkill, SkillResult
 from mimosa.skills.calculator_skill import CalculatorSkill
+from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
 from mimosa.skills.time_skill import TimeSkill
@@ -65,12 +66,14 @@ INTENT_WEATHER = "weather"
 INTENT_CALCULATOR = "calculator"
 INTENT_QUESTION = "question"
 INTENT_GREETING = "greeting"
+INTENT_FILE = "file_ops"
 INTENT_UNKNOWN = "unknown"
 
 SUPPORTED_INTENTS = (
     INTENT_TIME,
     INTENT_WEATHER,
     INTENT_CALCULATOR,
+    INTENT_FILE,
     INTENT_QUESTION,
     INTENT_GREETING,
 )
@@ -132,6 +135,28 @@ _GREETING_PATTERNS = [
     r"^\s*(thanks|thank you|thank u)\b",
 ]
 
+# File-operation patterns (M2.1). These catch explicit file/folder commands so
+# they are handled locally by the FileOperationsSkill with zero LLM calls. They
+# run before the question-shape heuristic so "where is my budget file" routes to
+# files rather than to the question skill.
+_FILE_PATTERNS = [
+    # create/make a (new) file or folder/directory
+    r"\b(create|make|new)\s+(a\s+|an\s+|the\s+)?(new\s+)?(file|folder|directory|dir)\b",
+    r"\b(create|make)\b.+\b(called|named|titled)\b",
+    # any file verb that explicitly mentions a file/folder noun
+    r"\b(open|delete|remove|trash|erase|rename|move|relocate|find|search|locate|list|show)\b"
+    r"[^?]*\b(file|folder|directory)\b",
+    # a file verb acting on something with a file extension (e.g. notes.txt)
+    r"\b(open|delete|remove|trash|erase|rename|move|relocate|find|search|locate)\b"
+    r"[^?]*\.[A-Za-z0-9]{1,6}\b",
+    # find/search/list a category of files
+    r"\b(find|search( for)?|locate|look for|where('?s| is)|list|show me)\b[^?]*\b"
+    r"(documents?|images?|photos?|pictures?|videos?|movies?|songs?|music|"
+    r"spreadsheets?|presentations?|pdfs?|downloads?)\b",
+    # move/rename X to Y
+    r"\b(move|rename|relocate)\b.+\bto\b",
+]
+
 
 def _matches_any(text: str, patterns: List[str]) -> bool:
     return any(re.search(p, text) for p in patterns)
@@ -172,6 +197,7 @@ class IntentRouter:
                 TimeSkill(),
                 CalculatorSkill(),
                 WeatherSkill(llm_provider=llm_provider),
+                FileOperationsSkill(),
                 GreetingSkill(llm_provider=llm_provider),
                 QuestionSkill(llm_provider=llm_provider),
             ]
@@ -214,6 +240,8 @@ class IntentRouter:
             return IntentClassification(INTENT_CALCULATOR, 0.95, source="heuristic")
         if _matches_any(lowered, _WEATHER_PATTERNS):
             return IntentClassification(INTENT_WEATHER, 0.9, source="heuristic")
+        if _matches_any(lowered, _FILE_PATTERNS):
+            return IntentClassification(INTENT_FILE, 0.92, source="heuristic")
         if _matches_any(lowered, _GREETING_PATTERNS):
             return IntentClassification(INTENT_GREETING, 0.9, source="heuristic")
 
@@ -309,6 +337,18 @@ class IntentRouter:
                 skill="router",
                 metadata={"intent": INTENT_UNKNOWN, "confidence": 0.0},
             )
+
+        # If a skill is mid-confirmation (e.g. a queued file delete awaiting a
+        # yes/no), route this utterance straight back to it so a bare "yes"/"no"
+        # resolves the prompt instead of being re-classified as a new intent.
+        for skill in self._skills:
+            if skill.has_pending_confirmation():
+                logger.info("Routing to %r to resolve pending confirmation.", skill.name)
+                result = skill.run(text, context=context)
+                result.metadata.setdefault("intent", skill.intents[0] if skill.intents else skill.name)
+                result.metadata.setdefault("confidence", 1.0)
+                result.metadata.setdefault("classification_source", "pending_confirmation")
+                return result
 
         classification = self.classify(text)
         intent = classification.intent
