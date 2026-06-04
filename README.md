@@ -10,9 +10,11 @@ learns your preferences over time, and is designed so its language model can run
 either in the cloud (Abacus.AI RouteLLM) or **fully locally** (Ollama,
 llama.cpp) with no code changes.
 
-> **Status:** Milestone **M1.1 — Project Setup & Environment** complete.
-> This establishes the project scaffold, the LLM abstraction layer, and the
-> tooling (health check + tests) the rest of the build depends on.
+> **Status:** **Phase 1 (Foundations) complete** — project scaffold + LLM
+> abstraction (M1.1), local-first voice pipeline (M1.2), and the three-tier
+> intent router with built-in skills (M1.3). **Phase 2** is underway:
+> **M2.1 — File Operations** is complete (search/open/create/move/delete with a
+> full safety sandbox). All **197 automated tests** pass offline.
 
 ---
 
@@ -205,6 +207,7 @@ is **hybrid**:
 | `weather` | `WeatherSkill` | ❌ local | Live conditions via [wttr.in](https://wttr.in) (no API key) |
 | `greeting` / `chitchat` | `GreetingSkill` | ✅ cloud | Friendly small talk (local fallback if offline) |
 | `question` | `QuestionSkill` | ✅ cloud | General-knowledge Q&A, concise & voice-friendly |
+| `file_ops` / `file` | `FileOperationsSkill` | ❌ local | **(M2.1)** Search, open, create, move, delete files/folders — sandboxed to your home dir |
 
 > **Privacy:** local skills never touch the network. LLM-backed skills send
 > only the **transcribed text** — never audio. Every skill degrades gracefully:
@@ -242,6 +245,44 @@ python scripts/test_full_loop.py --once
 
 See [`docs/INTENT_SYSTEM.md`](docs/INTENT_SYSTEM.md) for the full design,
 extension guide, and troubleshooting.
+
+---
+
+## 🗂️ File operations (M2.1 — system integration)
+
+MimOSA's first **system integration** skill lets you manage files by voice while
+a strict safety layer keeps the assistant inside your personal space.
+
+| You say | MimOSA does |
+|---------|-------------|
+| "Find my budget spreadsheet" | Case-insensitive name/type search across your home folder |
+| "Find my photos" | Filters by file-type category (images, documents, audio, video…) |
+| "Open report.pdf" | Launches it with the desktop default app (`xdg-open`) |
+| "Create a folder called Taxes" | Makes an empty directory |
+| "Create a file called notes.txt in Projects" | Creates a file (optionally inside a folder) |
+| "Move report.txt to Documents" | Moves/renames, with conflict detection |
+| "Delete old-notes.txt" | **Asks to confirm**, then moves it to the **Trash** (recoverable) |
+| "Permanently delete junk.txt" | **Asks to confirm**, then deletes for good |
+
+**Safety guardrails (always on):**
+
+- **Home-directory sandbox.** Operations are confined to `$HOME` (plus a few
+  scratch/removable mounts). Anything outside is refused.
+- **System blacklist.** `/etc`, `/bin`, `/sys`, `/proc`, `/boot`, `/usr`, … are
+  *never* touched, even via symlinks or `..` traversal (paths are fully resolved
+  first).
+- **Confirmation for destructive actions.** Deletes and overwriting moves are
+  two-step: MimOSA describes the action and waits for "yes"/"no".
+- **Trash by default.** Deletes go to the Trash via
+  [`send2trash`](https://pypi.org/project/Send2Trash/) so mistakes are
+  recoverable; permanent deletion is opt-in.
+- **Sensitive dotfiles** (`~/.ssh`, `~/.config`, `~/.gnupg`, …) get extra
+  caution before any destructive op.
+
+All operations are **100 % local** — nothing is sent to the cloud. The safety
+logic lives in [`mimosa/system/file_safety.py`](mimosa/system/file_safety.py)
+and the skill in [`mimosa/skills/file_ops.py`](mimosa/skills/file_ops.py). See
+[`docs/FILE_OPERATIONS.md`](docs/FILE_OPERATIONS.md) for the full design.
 
 ---
 

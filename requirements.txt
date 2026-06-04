@@ -30,6 +30,7 @@ pyaudio>=0.2.13,<0.3           # Microphone capture / playback (needs PortAudio)
 
 # --- System integration ---
 psutil>=5.9,<7.0               # CPU / RAM / process monitoring
+send2trash>=1.8,<2.2           # Cross-platform "move to Trash" for safe deletes (M2.1)
 
 # --- Testing ---
 pytest>=8.0,<9.0               # Test runner for the automated test suite

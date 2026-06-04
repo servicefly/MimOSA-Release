@@ -127,5 +127,16 @@ class BaseSkill(abc.ABC):
         """
         return "Sorry, I ran into a problem handling that request."
 
+    def has_pending_confirmation(self) -> bool:
+        """Whether this skill is awaiting a yes/no follow-up from the user.
+
+        The :class:`~mimosa.core.intent_router.IntentRouter` checks this *before*
+        classifying a new utterance: if a skill has queued a destructive action
+        (e.g. a delete awaiting confirmation), the next utterance is routed back
+        to that skill so a bare "yes"/"no" resolves the prompt instead of being
+        re-classified. Stateless skills return ``False`` (the default).
+        """
+        return False
+
     def __repr__(self) -> str:  # pragma: no cover - trivial
         return f"{type(self).__name__}(name={self.name!r}, intents={self.intents})"
