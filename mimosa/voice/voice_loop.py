@@ -12,9 +12,14 @@ Concretely, one turn is:
 1. **IDLE** -- wait for the wake word (Porcupine or the energy fallback).
 2. **LISTENING** -- record the user's utterance until they stop talking
    (:meth:`AudioManager.record_until_silence`).
-3. **PROCESSING** -- transcribe locally with Whisper, then hand the text to a
-   *response handler*. In M1.2 the default handler simply **echoes** the text
-   (no real LLM yet -- that arrives in a later milestone).
+3. **PROCESSING** -- transcribe locally with Whisper, then route the text. As
+   of M1.3 the transcript goes to the
+   :class:`~mimosa.core.intent_router.IntentRouter`, which classifies the
+   intent and dispatches to a skill (time, weather, calculator, question,
+   greeting). Conversation context is tracked across turns by a
+   :class:`~mimosa.core.conversation_manager.ConversationManager`. (If no
+   router is supplied, the loop falls back to a plain *response handler* --
+   e.g. the M1.2 echo handler -- for backwards compatibility and testing.)
 4. **SPEAKING** -- synthesize the response locally with Piper and play it.
 
 Everything except the (future) LLM step happens on-device, honoring MimOSA's
@@ -77,8 +82,17 @@ class VoiceLoop:
             a :class:`~mimosa.voice.stt.WhisperSTT` is created.
         tts: A text-to-speech engine exposing ``synthesize``. If ``None``, a
             :class:`~mimosa.voice.tts.PiperTTS` is created.
-        response_handler: Maps recognized text -> reply text. Defaults to
-            :func:`echo_response_handler`.
+        intent_router: An :class:`~mimosa.core.intent_router.IntentRouter` that
+            classifies the transcript and dispatches to a skill (M1.3). When
+            provided it takes precedence over ``response_handler``. If ``None``
+            and no ``response_handler`` is given, a default router is created
+            lazily on first use.
+        conversation_manager: A
+            :class:`~mimosa.core.conversation_manager.ConversationManager` for
+            multi-turn context. Created lazily if ``None``.
+        response_handler: Optional simple ``text -> reply`` callable. Used only
+            when no ``intent_router`` is active (e.g. the M1.2 echo handler in
+            tests). If both are ``None``, the intent router path is used.
         max_record_seconds: Safety cap on a single utterance recording.
 
     Note:
@@ -92,6 +106,8 @@ class VoiceLoop:
         wake_word_detector=None,
         stt=None,
         tts=None,
+        intent_router=None,
+        conversation_manager=None,
         response_handler: Optional[ResponseHandler] = None,
         max_record_seconds: float = 15.0,
     ) -> None:
@@ -99,7 +115,12 @@ class VoiceLoop:
         self._wake = wake_word_detector
         self._stt = stt
         self._tts = tts
-        self.response_handler: ResponseHandler = response_handler or echo_response_handler
+        self._router = intent_router
+        self._conversation = conversation_manager
+        # When an explicit response_handler is given (and no router), use the
+        # legacy handler path; otherwise the intent router drives responses.
+        self.response_handler: Optional[ResponseHandler] = response_handler
+        self._use_router = response_handler is None or intent_router is not None
         self.max_record_seconds = max_record_seconds
 
         self._state = VoiceState.IDLE
@@ -156,6 +177,37 @@ class VoiceLoop:
             self._tts = create_tts()
         return self._tts
 
+    @property
+    def router(self):
+        """The :class:`IntentRouter`, created lazily with the default LLM.
+
+        Building the router constructs the default skill set and an LLM
+        provider (Abacus.AI by default, or local when ``USE_LOCAL_LLM`` is set).
+        This is only invoked when the router path is active.
+        """
+        if self._router is None:
+            from mimosa.core.intent_router import IntentRouter
+            from mimosa.llm.provider_factory import create_provider
+
+            try:
+                provider = create_provider()
+            except Exception as exc:  # provider misconfig shouldn't crash setup
+                logger.warning("Could not create LLM provider (%s); "
+                               "LLM-backed skills will degrade.", exc)
+                provider = None
+            self._router = IntentRouter(llm_provider=provider)
+        return self._router
+
+    @property
+    def conversation(self):
+        """The :class:`ConversationManager`, created lazily."""
+        if self._conversation is None:
+            from mimosa.core.conversation_manager import ConversationManager
+
+            max_history = int(os.getenv("MAX_CONVERSATION_HISTORY", "10"))
+            self._conversation = ConversationManager(max_history=max_history)
+        return self._conversation
+
     # -- control -----------------------------------------------------------
 
     def stop(self) -> None:
@@ -211,16 +263,50 @@ class VoiceLoop:
             return None
 
         logger.info("Recognized: %r", text)
-        try:
-            reply = self.response_handler(text)
-        except Exception as exc:
-            logger.error("Response handler failed: %s", exc)
-            reply = "Sorry, something went wrong while processing that."
+        reply = self._generate_reply(text)
 
         # SPEAKING: synthesize + play the reply.
         self._speak(reply)
 
         self._set_state(VoiceState.IDLE)
+        return reply
+
+    def _generate_reply(self, text: str) -> str:
+        """Turn recognized ``text`` into a reply via the router or handler.
+
+        Uses the :class:`IntentRouter` (with conversation context) when the
+        router path is active; otherwise falls back to the legacy
+        ``response_handler``. Always returns a speakable string; never raises.
+        """
+        # Legacy/simple handler path (e.g. M1.2 echo handler in tests).
+        if not self._use_router and self.response_handler is not None:
+            try:
+                return self.response_handler(text)
+            except Exception as exc:
+                logger.error("Response handler failed: %s", exc)
+                return "Sorry, something went wrong while processing that."
+
+        # Intent-router path (M1.3): classify -> skill -> reply, with context.
+        try:
+            context = self.conversation.get_context_messages()
+        except Exception:  # pragma: no cover - context is best-effort
+            context = None
+
+        try:
+            result = self.router.route(text, context=context)
+            reply = result.text
+            intent = result.metadata.get("intent")
+        except Exception as exc:
+            logger.exception("Intent routing failed: %s", exc)
+            reply = "Sorry, something went wrong while processing that."
+            intent = None
+
+        # Record the turn for multi-turn context (best-effort).
+        try:
+            self.conversation.add_turn(user_text=text, assistant_text=reply, intent=intent)
+        except Exception:  # pragma: no cover
+            pass
+
         return reply
 
     def run(self) -> None:

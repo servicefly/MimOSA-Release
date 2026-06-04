@@ -291,10 +291,18 @@ class TestVoiceLoop:
         assert loop.state is vl.VoiceState.IDLE
 
     def test_run_once_echo_pipeline(self):
+        # Explicitly use the legacy echo handler to exercise the simple
+        # text->reply path (the M1.3 default is now the intent router, tested
+        # separately in test_intent_router.py).
         audio = _FakeAudio(pcm=b"speech")
         stt = _FakeSTT("hello there")
         tts = _FakeTTS()
-        loop = vl.VoiceLoop(audio_manager=audio, stt=stt, tts=tts)
+        loop = vl.VoiceLoop(
+            audio_manager=audio,
+            stt=stt,
+            tts=tts,
+            response_handler=vl.echo_response_handler,
+        )
         reply = loop.run_once(wait_for_wake=False)
         assert reply == "You said: hello there"
         assert tts.spoken == ["You said: hello there"]
@@ -334,7 +342,12 @@ class TestVoiceLoop:
                 raise tts_mod.TTSError("boom")
 
         audio = _FakeAudio(pcm=b"speech")
-        loop = vl.VoiceLoop(audio_manager=audio, stt=_FakeSTT("hi"), tts=_BadTTS())
+        loop = vl.VoiceLoop(
+            audio_manager=audio,
+            stt=_FakeSTT("hi"),
+            tts=_BadTTS(),
+            response_handler=vl.echo_response_handler,
+        )
         # Reply is still returned even though speaking failed.
         assert loop.run_once(wait_for_wake=False) == "You said: hi"
 
