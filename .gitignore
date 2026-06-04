@@ -1,0 +1,79 @@
+# ---------------------------------------------------------------------------
+# MimOSA .gitignore
+# Privacy-first project: never commit secrets, user data, or local models.
+# ---------------------------------------------------------------------------
+
+# --- Secrets & environment ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Packaging / build artifacts ---
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# --- Testing / coverage / type checking ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# --- Local user data (privacy: never commit) ---
+# Ignore everything inside data/, but keep the directory structure via .gitkeep.
+# (Re-include directories so git descends into them, then re-include .gitkeep.)
+data/**
+!data/**/
+!data/**/.gitkeep
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# --- Downloaded / local model weights (large, regenerated on first run) ---
+models/
+*.pt
+*.pth
+*.onnx
+*.gguf
+*.bin
+
+# --- Logs ---
+*.log
+logs/
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+
+# --- Keep the data/models directory placeholder ---
+# (the generic "models/" rule above would otherwise hide data/models/)
+!data/models/
+!data/models/.gitkeep

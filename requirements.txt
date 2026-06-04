@@ -1,0 +1,35 @@
+# ===========================================================================
+# MimOSA - Phase 1 Python dependencies
+# Target: Python 3.10+  (developed/tested on 3.11)
+#
+# Install with:   pip install -r requirements.txt
+#
+# Notes:
+#   * pyaudio requires the PortAudio system library:
+#         sudo apt install portaudio19-dev
+#   * openai-whisper pulls in PyTorch (large download).
+#   * Version pins use compatible-release / lower bounds to stay reproducible
+#     while allowing patch updates.
+# ===========================================================================
+
+# --- LLM / API ---
+requests>=2.31,<3.0            # HTTP client for Abacus.AI RouteLLM calls
+python-dotenv>=1.0,<2.0        # Load configuration from .env files
+
+# --- Voice: wake word ---
+pvporcupine>=3.0,<4.0          # Porcupine wake-word detection
+
+# --- Voice: speech-to-text (local) ---
+openai-whisper>=20231117       # Local STT (no cloud dependency)
+
+# --- Voice: text-to-speech (local) ---
+piper-tts>=1.2,<2.0            # Local, natural-sounding TTS
+
+# --- Audio I/O ---
+pyaudio>=0.2.13,<0.3           # Microphone capture / playback (needs PortAudio)
+
+# --- System integration ---
+psutil>=5.9,<7.0               # CPU / RAM / process monitoring
+
+# --- Testing ---
+pytest>=8.0,<9.0               # Test runner for the automated test suite
