@@ -13,8 +13,10 @@ llama.cpp) with no code changes.
 > **Status:** **Phase 1 (Foundations) complete** — project scaffold + LLM
 > abstraction (M1.1), local-first voice pipeline (M1.2), and the three-tier
 > intent router with built-in skills (M1.3). **Phase 2** is underway:
-> **M2.1 — File Operations** is complete (search/open/create/move/delete with a
-> full safety sandbox). All **197 automated tests** pass offline.
+> **M2.1 — File Operations** (search/open/create/move/delete with a full safety
+> sandbox) and **M2.2 — Application Launching & System Control** (launch/close
+> apps via the `.desktop` catalog, plus volume/brightness/Wi-Fi/battery) are
+> complete. All **280 automated tests** pass offline.
 
 ---
 
@@ -208,6 +210,8 @@ is **hybrid**:
 | `greeting` / `chitchat` | `GreetingSkill` | ✅ cloud | Friendly small talk (local fallback if offline) |
 | `question` | `QuestionSkill` | ✅ cloud | General-knowledge Q&A, concise & voice-friendly |
 | `file_ops` / `file` | `FileOperationsSkill` | ❌ local | **(M2.1)** Search, open, create, move, delete files/folders — sandboxed to your home dir |
+| `application` / `app_launch` | `ApplicationSkill` | ❌ local | **(M2.2)** Launch / list / query / close desktop apps via the `.desktop` catalog |
+| `system_control` / `system` | `SystemControlSkill` | ❌ local | **(M2.2)** Volume, screen brightness, Wi-Fi, and battery — with graceful degradation |
 
 > **Privacy:** local skills never touch the network. LLM-backed skills send
 > only the **transcribed text** — never audio. Every skill degrades gracefully:
@@ -283,6 +287,50 @@ All operations are **100 % local** — nothing is sent to the cloud. The safety
 logic lives in [`mimosa/system/file_safety.py`](mimosa/system/file_safety.py)
 and the skill in [`mimosa/skills/file_ops.py`](mimosa/skills/file_ops.py). See
 [`docs/FILE_OPERATIONS.md`](docs/FILE_OPERATIONS.md) for the full design.
+
+---
+
+## 🚀 Application launching & system control (M2.2 — system integration)
+
+MimOSA can now open and manage your apps, and adjust low-level system state —
+all **100 % locally**, with no cloud calls.
+
+### Applications
+
+| You say | MimOSA does |
+|---------|-------------|
+| "Open Firefox" / "Launch the text editor" | Resolves the name against the installed `.desktop` catalog (fuzzy-matched) and launches it, detached |
+| "What browsers do I have?" | Lists apps by freedesktop category |
+| "Is Firefox running?" | Checks live processes via `psutil` |
+| "Close Firefox" | **Asks to confirm**, then ends it gracefully (`SIGTERM` → `SIGKILL` fallback) |
+
+Apps are discovered by parsing `.desktop` files from
+`~/.local/share/applications`, `/usr/share/applications`, and the other standard
+locations — malformed/hidden entries are skipped, and lookups tolerate imperfect
+speech-to-text ("fire fox" → Firefox).
+
+### System control
+
+| You say | MimOSA does |
+|---------|-------------|
+| "Turn the volume up" / "Set volume to 30 percent" / "Mute" | Adjusts audio (`wpctl` → `pactl` → `amixer`) |
+| "Brightness down" / "Set brightness to 70 percent" | Adjusts the screen (`brightnessctl` → `xbacklight`) |
+| "Turn Wi-Fi off" | **Asks to confirm** (it disconnects you), then `nmcli radio wifi off` |
+| "Is my Wi-Fi on?" / "Turn Wi-Fi on" | Reports / enables Wi-Fi |
+| "How much battery do I have left?" | Reads `/sys/class/power_supply` directly |
+
+**Graceful degradation:** each command probes for an available backend with
+`shutil.which`. If the underlying tool isn't installed, MimOSA says so clearly
+instead of crashing. Disruptive changes (closing an app, turning Wi-Fi off) are
+confirmed first; reversible ones (volume/brightness) act immediately.
+
+The logic lives in
+[`mimosa/system/app_registry.py`](mimosa/system/app_registry.py),
+[`mimosa/system/system_control.py`](mimosa/system/system_control.py),
+[`mimosa/skills/application.py`](mimosa/skills/application.py), and
+[`mimosa/skills/system_control.py`](mimosa/skills/system_control.py). See
+[`docs/APPLICATION_CONTROL.md`](docs/APPLICATION_CONTROL.md) for the full design
+and the optional system dependencies.
 
 ---
 

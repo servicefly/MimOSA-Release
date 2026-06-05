@@ -29,7 +29,7 @@ piper-tts>=1.2,<2.0            # Local, natural-sounding TTS
 pyaudio>=0.2.13,<0.3           # Microphone capture / playback (needs PortAudio)
 
 # --- System integration ---
-psutil>=5.9,<7.0               # CPU / RAM / process monitoring
+psutil>=5.9,<8.0               # CPU / RAM / process monitoring; app process control (M2.2)
 send2trash>=1.8,<2.2           # Cross-platform "move to Trash" for safe deletes (M2.1)
 
 # --- Testing ---

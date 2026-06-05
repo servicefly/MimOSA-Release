@@ -50,11 +50,13 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from mimosa.llm.base_provider import LLMError, Message, Role
+from mimosa.skills.application import ApplicationSkill
 from mimosa.skills.base_skill import BaseSkill, SkillResult
 from mimosa.skills.calculator_skill import CalculatorSkill
 from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
+from mimosa.skills.system_control import SystemControlSkill
 from mimosa.skills.time_skill import TimeSkill
 from mimosa.skills.weather_skill import WeatherSkill
 
@@ -67,6 +69,8 @@ INTENT_CALCULATOR = "calculator"
 INTENT_QUESTION = "question"
 INTENT_GREETING = "greeting"
 INTENT_FILE = "file_ops"
+INTENT_APPLICATION = "application"
+INTENT_SYSTEM = "system_control"
 INTENT_UNKNOWN = "unknown"
 
 SUPPORTED_INTENTS = (
@@ -74,6 +78,8 @@ SUPPORTED_INTENTS = (
     INTENT_WEATHER,
     INTENT_CALCULATOR,
     INTENT_FILE,
+    INTENT_APPLICATION,
+    INTENT_SYSTEM,
     INTENT_QUESTION,
     INTENT_GREETING,
 )
@@ -158,6 +164,41 @@ _FILE_PATTERNS = [
 ]
 
 
+# System-control patterns (M2.2). These catch volume/brightness/Wi-Fi/battery
+# commands so they are handled locally by the SystemControlSkill with zero LLM
+# calls. Checked before the application patterns so "turn the volume up" is not
+# mistaken for "turn ... up <app>".
+_SYSTEM_PATTERNS = [
+    # volume / audio
+    r"\b(volume|sound|audio)\b",
+    r"\b(mute|unmute|silence)\b",
+    r"\b(louder|quieter|turn it (up|down))\b",
+    # brightness
+    r"\bbright(ness)?\b",
+    r"\b(dim|brighten)\b.*\b(screen|display)\b",
+    r"\b(screen|display)\b.*\bbright",
+    # wifi / wireless
+    r"\b(wi-?fi|wireless)\b",
+    # battery / power
+    r"\b(battery|charge level|how much (battery|charge|power))\b",
+]
+
+# Application launch/control patterns (M2.2). These catch app commands so they
+# route locally to the ApplicationSkill. They run after file patterns (so
+# "open my notes file" stays a file op) and after system patterns.
+_APP_PATTERNS = [
+    # launch verbs
+    r"\b(open|launch|start|run|fire up|bring up)\b",
+    # close/kill verbs paired with an app-ish object
+    r"\b(close|quit|kill|terminate)\b",
+    # is X running / open
+    r"\b(is|are)\b.+\b(running|open|active)\b",
+    # list/what apps/browsers/editors
+    r"\b(list|show|what|which)\b.*\b(apps?|applications?|programs?|browsers?|"
+    r"editors?|games?)\b",
+]
+
+
 def _matches_any(text: str, patterns: List[str]) -> bool:
     return any(re.search(p, text) for p in patterns)
 
@@ -198,6 +239,8 @@ class IntentRouter:
                 CalculatorSkill(),
                 WeatherSkill(llm_provider=llm_provider),
                 FileOperationsSkill(),
+                ApplicationSkill(),
+                SystemControlSkill(),
                 GreetingSkill(llm_provider=llm_provider),
                 QuestionSkill(llm_provider=llm_provider),
             ]
@@ -242,6 +285,10 @@ class IntentRouter:
             return IntentClassification(INTENT_WEATHER, 0.9, source="heuristic")
         if _matches_any(lowered, _FILE_PATTERNS):
             return IntentClassification(INTENT_FILE, 0.92, source="heuristic")
+        if _matches_any(lowered, _SYSTEM_PATTERNS):
+            return IntentClassification(INTENT_SYSTEM, 0.93, source="heuristic")
+        if _matches_any(lowered, _APP_PATTERNS):
+            return IntentClassification(INTENT_APPLICATION, 0.9, source="heuristic")
         if _matches_any(lowered, _GREETING_PATTERNS):
             return IntentClassification(INTENT_GREETING, 0.9, source="heuristic")
 
