@@ -125,6 +125,7 @@ class VoiceLoop:
 
         self._state = VoiceState.IDLE
         self._stop_requested = False
+        self._state_listeners: list = []
 
     # -- state -------------------------------------------------------------
 
@@ -133,10 +134,34 @@ class VoiceLoop:
         """The current :class:`VoiceState`."""
         return self._state
 
+    def add_state_listener(self, callback) -> None:
+        """Register a callback invoked on every state change.
+
+        The callback receives the new :class:`VoiceState`. Listeners are an
+        optional, best-effort observation seam (the GTK avatar UI in Phase 3
+        subscribes here to mirror the assistant's state). A listener raising an
+        exception is logged and ignored -- it can never break the voice loop.
+        Adding the same callback twice is a no-op.
+        """
+        if callback is not None and callback not in self._state_listeners:
+            self._state_listeners.append(callback)
+
+    def remove_state_listener(self, callback) -> None:
+        """Unregister a previously added state-change callback (safe if absent)."""
+        try:
+            self._state_listeners.remove(callback)
+        except ValueError:
+            pass
+
     def _set_state(self, state: VoiceState) -> None:
         if state is not self._state:
             logger.debug("Voice state: %s -> %s", self._state.value, state.value)
             self._state = state
+            for listener in list(self._state_listeners):
+                try:
+                    listener(state)
+                except Exception as exc:  # pragma: no cover - listeners are best-effort
+                    logger.error("State listener failed: %s", exc)
 
     # -- lazy component accessors -----------------------------------------
 

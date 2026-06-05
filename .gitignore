@@ -77,3 +77,9 @@ Thumbs.db
 # (the generic "models/" rule above would otherwise hide data/models/)
 !data/models/
 !data/models/.gitkeep
+
+# --- Keep bundled avatar source assets (small, version-controlled UI assets) ---
+!data/avatars/
+!data/avatars/*.svg
+!data/avatars/*.png
+!data/avatars/README.md

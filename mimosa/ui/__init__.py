@@ -1,19 +1,34 @@
 """User interface package for MimOSA (GTK4 -- Phase 3).
 
-Houses the graphical interface that gives MimOSA a visible, personality-driven
-presence on the desktop:
+Gives MimOSA a visible, personality-driven presence on the desktop: a small,
+circular, always-on-top **avatar window** whose animation mirrors the assistant's
+state (idle, listening, processing, speaking).
 
-* **System tray icon** -- status indicator (idle, listening, thinking,
-  speaking).
-* **Chat window** -- a minimal, expandable conversation view with a text input
-  field as a backup to voice.
-* **2D avatar** -- a personality-driven avatar with sprite-based animation
-  (mouth sync, expressions).
+Modules (M3.1 -- GTK4 window design)
+------------------------------------
+* :mod:`mimosa.ui.ui_config` -- persistent UI preferences (size, position,
+  opacity, theme, animation). Pure, no GTK; fully unit-tested.
+* :mod:`mimosa.ui.state_bridge` -- thread-safe bridge mapping ``VoiceState`` to a
+  UI :class:`~mimosa.ui.state_bridge.UIState` and marshaling updates onto the GTK
+  main loop via ``GLib.idle_add``.
+* :mod:`mimosa.ui.avatar_renderer` -- Cairo renderer with per-state animations;
+  the animation math is pure and testable independent of any drawing backend.
+* :mod:`mimosa.ui.avatar_assets` -- locator for optional SVG/PNG avatar assets.
+* :mod:`mimosa.ui.avatar_window` -- the GTK4 frameless, transparent, draggable
+  avatar window (defined only when GTK 4 is importable).
+* :mod:`mimosa.ui.window_manager` -- window lifecycle, position persistence, and
+  multi-monitor logic (pure geometry separated from GTK glue).
+* :mod:`mimosa.ui.environment` -- GUI/headless detection (``DISPLAY`` + GTK 4).
+* :mod:`mimosa.ui.app` -- application entry point; chooses GUI vs headless and
+  runs the voice loop with or without the avatar.
 
-The UI is built with GTK4 (Cairo/Pixbuf for avatar rendering) for native,
-lightweight Linux integration. These modules are scheduled for Phase 3 and are
-intentionally left as placeholders during M1.1.
-
-Future modules expected here: ``tray.py``, ``chat_window.py``, and
-``avatar.py``.
+Design guarantees (consistent with the rest of MimOSA)
+------------------------------------------------------
+* **Optional & graceful.** Importing this package never requires GTK. The
+  avatar runs only when both a display server *and* GTK 4 are present; otherwise
+  MimOSA runs headless with **no** GTK imported.
+* **Privacy-first.** No telemetry, no tracking; preferences stay in a local
+  JSON file under ``~/.config/mimosa``.
+* **Thread-safe.** The voice loop runs off the GTK main thread; all widget
+  updates are marshaled through ``GLib.idle_add``.
 """
