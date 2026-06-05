@@ -102,9 +102,31 @@ class MimOSAApplication:
 
     # -- headless mode -----------------------------------------------------
 
+    def _maybe_run_setup_wizard(self, transient_for=None) -> None:
+        """Run the first-run setup wizard if this is a first launch (M4.2).
+
+        Headless: completes silently with defaults (so startup never blocks).
+        GUI: opens the wizard dialog. Best-effort -- any failure is non-fatal.
+        """
+        try:
+            if not self.config_manager.is_first_run():
+                return
+            from mimosa.ui.setup_wizard_dialog import open_setup_wizard
+
+            dialog = open_setup_wizard(
+                self.config_manager,
+                transient_for=transient_for,
+                on_close=lambda applied: self._apply_ui_preferences(),
+            )
+            if dialog is None:
+                logger.info("First-run setup completed with defaults (headless).")
+        except Exception:  # pragma: no cover - wizard is best-effort
+            logger.debug("Setup wizard could not run", exc_info=True)
+
     def run_headless(self) -> int:
         """Run the voice loop directly with no GUI. Returns a process exit code."""
         logger.info("Starting MimOSA in headless mode (%s)", describe_environment())
+        self._maybe_run_setup_wizard()
         try:
             self.voice_loop.run()
         except KeyboardInterrupt:  # pragma: no cover - interactive
@@ -142,6 +164,9 @@ class MimOSAApplication:
             )
             self.window = window
             window_manager.apply_to_window(window)
+
+            # First-run setup wizard (M4.2), modal to the avatar.
+            self._maybe_run_setup_wizard(transient_for=window)
 
             # Bridge voice states -> avatar (thread-safe via GLib.idle_add).
             self.bridge = StateBridge(on_state_change=window.set_state)
