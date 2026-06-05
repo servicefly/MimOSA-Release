@@ -37,6 +37,20 @@ Modules (M3.2 -- enhanced TTS / viseme lip-sync)
   + synthesized audio into a :class:`~mimosa.voice.phoneme_extractor.VisemeTimeline`,
   preferring phonemes and falling back to amplitude analysis -- all on-device.
 
+Modules (M3.3 -- settings & preferences UI)
+-------------------------------------------
+* :mod:`mimosa.ui.settings_logic` -- the GTK-free
+  :class:`~mimosa.ui.settings_logic.SettingsController`: holds a working copy of
+  the configuration, exposes the declarative page/field descriptors the dialog
+  renders, validates edits, manages skill enable/priority, detects when a
+  restart is required, and commits changes back to the config manager. Fully
+  unit-testable without a display.
+* :mod:`mimosa.ui.settings_dialog` -- the GTK4 multi-page Settings window
+  (Voice, Skills, System Integration, Privacy & Data, Appearance, About) with
+  Apply / Cancel / OK. A thin view over the controller; defined only when GTK 4
+  is importable (``SettingsDialog is None`` on headless machines). Backed by
+  :mod:`mimosa.utils.config`.
+
 Design guarantees (consistent with the rest of MimOSA)
 ------------------------------------------------------
 * **Optional & graceful.** Importing this package never requires GTK. The
