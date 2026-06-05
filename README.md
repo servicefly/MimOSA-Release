@@ -18,10 +18,13 @@ llama.cpp) with no code changes.
 > (launch/close apps via the `.desktop` catalog, plus volume/brightness/Wi-Fi/
 > battery), and **M2.3 — Kubuntu 26.04 Integration** (OS/hardware profiling, KDE
 > Plasma D-Bus integration, hardware-aware optimization, and a voice
-> `SystemInfoSkill`). **Phase 3 (UI & Avatar) has begun:** **M3.1 — GTK4 Window
+> `SystemInfoSkill`). **Phase 3 (UI & Avatar) is underway:** **M3.1 — GTK4 Window
 > Design** adds an optional circular, always-on-top desktop **avatar** that
 > animates with the assistant's state (idle / listening / processing /
-> speaking), with full headless fallback. All **518 automated tests** pass
+> speaking), and **M3.2 — Enhanced TTS / Lip-Sync** gives the avatar a mouth
+> that syncs to spoken audio using **on-device** Piper phonemes (with an
+> amplitude-envelope fallback) — no network, no third-party APIs. Both degrade
+> gracefully to a full headless fallback. All **682 automated tests** pass
 > offline.
 
 ---
@@ -425,6 +428,35 @@ Implemented in [`mimosa/ui/`](mimosa/ui/) —
 [`environment.py`](mimosa/ui/environment.py). See
 [`docs/UI_ARCHITECTURE.md`](docs/UI_ARCHITECTURE.md) for the full design,
 threading model, and GTK4 install instructions for Kubuntu 26.04.
+
+---
+
+## 👄 Lip-sync (M3.2 — enhanced TTS / viseme sync)
+
+The avatar can now **move its mouth in time with speech**, entirely on-device.
+
+- **On-device phonemes** — `PiperTTS.synthesize_with_visemes(text)` returns the
+  WAV **and** a `VisemeTimeline` built from the local Piper/eSpeak engine's
+  phonemes. No network, no third-party phoneme/viseme services.
+- **Robust fallback chain** — timed phonemes → estimated timing from phoneme
+  strings → **amplitude-envelope** visemes straight from the audio → empty
+  timeline (the M3.1 speaking bar). Extraction is wrapped so it **never** raises
+  into the voice loop; the audio is always returned.
+- **10 visemes + silence** — a compact `Viseme` set maps IPA/ASCII phonemes to
+  mouth shapes (bilabial, labiodental, rounded, open, …), animated with
+  frame-rate-independent easing and drawn with Cairo bezier curves.
+- **Tunable & optional** — `lipsync_enabled`, `viseme_speed`, `mouth_style`
+  (`natural`/`cartoon`/`minimal`), `lipsync_latency`, and `lipsync_debug` live in
+  the UI config. Works headless: with no Cairo/display the mouth draw is a no-op
+  and speech is unaffected.
+
+Implemented in [`mimosa/ui/viseme_mapper.py`](mimosa/ui/viseme_mapper.py),
+[`mimosa/voice/phoneme_extractor.py`](mimosa/voice/phoneme_extractor.py),
+[`mimosa/ui/audio_sync.py`](mimosa/ui/audio_sync.py),
+[`mimosa/ui/mouth_animator.py`](mimosa/ui/mouth_animator.py) (plus
+`tts.py` / `avatar_renderer.py` updates). See
+[`docs/VISEME_SYSTEM.md`](docs/VISEME_SYSTEM.md) for the mapping table, timing
+model, and fallback chain.
 
 ---
 
