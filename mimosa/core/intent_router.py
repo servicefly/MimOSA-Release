@@ -57,6 +57,7 @@ from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
 from mimosa.skills.system_control import SystemControlSkill
+from mimosa.skills.system_info import SystemInfoSkill
 from mimosa.skills.time_skill import TimeSkill
 from mimosa.skills.weather_skill import WeatherSkill
 
@@ -71,6 +72,7 @@ INTENT_GREETING = "greeting"
 INTENT_FILE = "file_ops"
 INTENT_APPLICATION = "application"
 INTENT_SYSTEM = "system_control"
+INTENT_SYSTEM_INFO = "system_info"
 INTENT_UNKNOWN = "unknown"
 
 SUPPORTED_INTENTS = (
@@ -80,6 +82,7 @@ SUPPORTED_INTENTS = (
     INTENT_FILE,
     INTENT_APPLICATION,
     INTENT_SYSTEM,
+    INTENT_SYSTEM_INFO,
     INTENT_QUESTION,
     INTENT_GREETING,
 )
@@ -199,6 +202,48 @@ _APP_PATTERNS = [
 ]
 
 
+# System-information patterns (M2.3). These catch read-only questions about
+# the host -- the OS/distro, desktop environment, display server (Wayland/X11),
+# KDE Plasma version, CPU/RAM/GPU/displays, the audio backend, and tuning
+# recommendations -- so the SystemInfoSkill answers them locally with zero LLM
+# calls. They are checked *before* the system-control patterns (so "what audio
+# backend am I using" is treated as a query, not a volume command) and before
+# the Tier-1b question-shape heuristic (so "what desktop am I using?" doesn't
+# fall through to the LLM question skill).
+_SYSTEM_INFO_PATTERNS = [
+    # desktop environment / window manager
+    r"\b(what|which)\b.*\bdesktop( environment)?\b",
+    r"\bdesktop environment\b",
+    r"\bwindow manager\b",
+    # display server
+    r"\b(display server|wayland|x11|xorg)\b",
+    # KDE Plasma
+    r"\b(plasma version|kde version|version of plasma|version of kde)\b",
+    r"\bplasma\b.*\bversion\b",
+    # distro / OS
+    r"\bwhat\b.*\b(operating system|distro|distribution)\b",
+    r"\b(what|which)\b.*\bversion of (kubuntu|ubuntu|linux|the os)\b",
+    r"\b(which|what)\s+(linux|distro|distribution)\b",
+    # audio backend (info, not control)
+    r"\b(audio|sound)\s+(backend|server|system|stack)\b",
+    r"\b(what|which)\b.*\b(audio|sound)\b.*\b(am i|using|do i have)\b",
+    # microphone presence
+    r"\b(do i have|is there)\b.*\b(microphone|mic)\b",
+    r"\bmicrophone\b",
+    # CPU / RAM / GPU / displays as queries
+    r"\bhow (much|many)\b.*\b(ram|memory|cpu|cores?|threads?|gpus?|graphics)\b",
+    r"\b(what|which)\b.*\b(cpu|processor|gpu|graphics card|graphics adapter|video card)\b",
+    r"\b(what|how much)\b.*\b(ram|memory)\b",
+    # specs / general system info
+    r"\b(system|hardware)\s+(specs?|specifications?|info(rmation)?)\b",
+    r"\b(my|this)\s+(system|hardware)\s+(specs?|specifications?)\b",
+    r"\bshow\b.*\b(system|hardware)\b.*\b(specs?|info)\b",
+    r"\babout (this|my) (system|computer|machine|pc|laptop)\b",
+    # tuning recommendations
+    r"\b(recommend|optimi[sz]e|tune|tuning)\b.*\b(settings|machine|system|hardware|config(uration)?)\b",
+]
+
+
 def _matches_any(text: str, patterns: List[str]) -> bool:
     return any(re.search(p, text) for p in patterns)
 
@@ -241,6 +286,7 @@ class IntentRouter:
                 FileOperationsSkill(),
                 ApplicationSkill(),
                 SystemControlSkill(),
+                SystemInfoSkill(),
                 GreetingSkill(llm_provider=llm_provider),
                 QuestionSkill(llm_provider=llm_provider),
             ]
@@ -285,6 +331,8 @@ class IntentRouter:
             return IntentClassification(INTENT_WEATHER, 0.9, source="heuristic")
         if _matches_any(lowered, _FILE_PATTERNS):
             return IntentClassification(INTENT_FILE, 0.92, source="heuristic")
+        if _matches_any(lowered, _SYSTEM_INFO_PATTERNS):
+            return IntentClassification(INTENT_SYSTEM_INFO, 0.92, source="heuristic")
         if _matches_any(lowered, _SYSTEM_PATTERNS):
             return IntentClassification(INTENT_SYSTEM, 0.93, source="heuristic")
         if _matches_any(lowered, _APP_PATTERNS):

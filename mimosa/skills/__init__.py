@@ -32,6 +32,7 @@ from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
 from mimosa.skills.system_control import SystemControlSkill
+from mimosa.skills.system_info import SystemInfoSkill
 from mimosa.skills.time_skill import TimeSkill
 from mimosa.skills.weather_skill import WeatherSkill
 
@@ -46,4 +47,5 @@ __all__ = [
     "FileOperationsSkill",
     "ApplicationSkill",
     "SystemControlSkill",
+    "SystemInfoSkill",
 ]
