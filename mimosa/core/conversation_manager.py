@@ -26,12 +26,18 @@ injected to persist/retrieve turns without changing callers. The
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from mimosa.llm.base_provider import Message, Role
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from mimosa.memory.conversation_store import ConversationStore
+
+logger = logging.getLogger(__name__)
 
 #: Default number of *turns* (user+assistant pairs) to retain.
 DEFAULT_MAX_HISTORY = 10
@@ -52,6 +58,13 @@ class Turn:
     assistant_text: str = ""
     intent: Optional[str] = None
     timestamp: float = field(default_factory=time.time)
+    #: Whether this turn was flagged sensitive (Privacy Guard, M5.4). Private
+    #: turns stay in the live buffer but may be withheld from cloud context and
+    #: from disk depending on policy.
+    is_private: bool = False
+    #: Internal: set once the turn has been written to a durable store so it is
+    #: never persisted twice. Not part of the serialized record.
+    _persisted: bool = field(default=False, repr=False, compare=False)
 
 
 class ConversationManager:
@@ -64,39 +77,120 @@ class ConversationManager:
         session_id: Optional explicit session id; a UUID4 is generated if omitted.
     """
 
-    def __init__(self, max_history: int = DEFAULT_MAX_HISTORY, session_id: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        max_history: int = DEFAULT_MAX_HISTORY,
+        session_id: Optional[str] = None,
+        store: "Optional[ConversationStore]" = None,
+        *,
+        persist_private: bool = True,
+    ) -> None:
         self.max_history = max(1, int(max_history))
         self.session_id = session_id or uuid.uuid4().hex
         self.created_at = time.time()
         self._turns: List[Turn] = []
+        #: Optional durable backing store (M5.1). When set, completed turns are
+        #: mirrored to SQLite so context survives restarts. ``None`` preserves
+        #: the original in-memory-only behaviour (fully backward compatible).
+        self.store = store
+        #: Whether to also persist turns flagged private. The in-memory buffer
+        #: always holds them for the live session; this only governs disk.
+        self.persist_private = bool(persist_private)
+        if self.store is not None:
+            try:
+                self.store.ensure_session(self.session_id)
+            except Exception:  # pragma: no cover - storage faults are non-fatal
+                logger.exception("Could not initialise session in store; continuing")
 
     # -- recording ---------------------------------------------------------
 
-    def add_turn(self, user_text: str, assistant_text: str = "", intent: Optional[str] = None) -> Turn:
+    def add_turn(
+        self,
+        user_text: str,
+        assistant_text: str = "",
+        intent: Optional[str] = None,
+        *,
+        is_private: bool = False,
+    ) -> Turn:
         """Record a completed turn and enforce the history bound.
+
+        When a durable :attr:`store` is attached the turn is also persisted
+        (unless it is private and ``persist_private`` is ``False``).
 
         Returns:
             The :class:`Turn` that was appended.
         """
-        turn = Turn(user_text=user_text, assistant_text=assistant_text, intent=intent)
+        # Flush any previous still-pending turn (e.g. a user utterance whose
+        # reply never arrived) so it isn't lost when a new turn starts.
+        if self._turns and not self._turns[-1]._persisted:
+            self._persist_turn(self._turns[-1])
+        turn = Turn(
+            user_text=user_text,
+            assistant_text=assistant_text,
+            intent=intent,
+            is_private=is_private,
+        )
         self._turns.append(turn)
         # Evict oldest turns beyond the cap.
         if len(self._turns) > self.max_history:
             self._turns = self._turns[-self.max_history:]
+        # Persist immediately only when the turn is already complete (has a
+        # reply). A user-only turn stays pending until the reply is filled in
+        # via update_last_response, avoiding a duplicate row.
+        if turn.assistant_text:
+            self._persist_turn(turn)
         return turn
 
-    def update_last_response(self, assistant_text: str, intent: Optional[str] = None) -> None:
+    def update_last_response(
+        self,
+        assistant_text: str,
+        intent: Optional[str] = None,
+        *,
+        is_private: Optional[bool] = None,
+    ) -> None:
         """Fill in the assistant reply (and optionally intent) for the latest turn.
 
         Useful when the user text is recorded first (on capture) and the reply
-        is known later (after the skill runs).
+        is known later (after the skill runs). If a store is attached the
+        updated turn is (re)persisted once complete.
         """
         if not self._turns:
-            self.add_turn(user_text="", assistant_text=assistant_text, intent=intent)
+            self.add_turn(
+                user_text="",
+                assistant_text=assistant_text,
+                intent=intent,
+                is_private=bool(is_private),
+            )
             return
-        self._turns[-1].assistant_text = assistant_text
+        last = self._turns[-1]
+        # This turn was created earlier (user side) but not yet persisted; fill
+        # it in and persist the complete turn now to avoid duplicate rows.
+        last.assistant_text = assistant_text
         if intent is not None:
-            self._turns[-1].intent = intent
+            last.intent = intent
+        if is_private is not None:
+            last.is_private = bool(is_private)
+        if not last._persisted:
+            self._persist_turn(last)
+
+    def _persist_turn(self, turn: Turn) -> None:
+        """Mirror a turn to the durable store, if one is attached."""
+        if self.store is None or turn._persisted:
+            return
+        if turn.is_private and not self.persist_private:
+            return
+        try:
+            self.store.add_turn(
+                self.session_id,
+                turn.user_text,
+                turn.assistant_text,
+                intent=turn.intent,
+                is_private=turn.is_private,
+                timestamp=turn.timestamp,
+            )
+            turn._persisted = True
+        except Exception:  # pragma: no cover - storage faults are non-fatal
+            logger.exception("Failed to persist turn to store; continuing")
 
     # -- access ------------------------------------------------------------
 
@@ -136,17 +230,89 @@ class ConversationManager:
         """The intent of the most recent turn, if any."""
         return self._turns[-1].intent if self._turns else None
 
+    # -- durable store integration (M5.1) ---------------------------------
+
+    def flush(self) -> None:
+        """Persist any still-pending turns to the durable store (if attached).
+
+        Call on shutdown (or before discarding the manager) so a final
+        user-only turn whose reply never arrived is not lost.
+        """
+        for turn in self._turns:
+            if not turn._persisted:
+                self._persist_turn(turn)
+
+    def load_from_store(self, max_turns: Optional[int] = None) -> int:
+        """Rehydrate the in-memory buffer from the durable store.
+
+        Reconstructs turns for :attr:`session_id` from persisted messages so a
+        restarted MimOSA resumes with prior context. Pairs consecutive
+        user→assistant messages into turns. Returns the number of turns loaded.
+        ``max_turns`` defaults to :attr:`max_history`.
+        """
+        if self.store is None:
+            return 0
+        limit = self.max_history if max_turns is None else max(1, int(max_turns))
+        try:
+            stored = self.store.get_messages(self.session_id)
+        except Exception:  # pragma: no cover - storage faults are non-fatal
+            logger.exception("Could not load session from store; continuing")
+            return 0
+
+        turns: List[Turn] = []
+        pending: Optional[Turn] = None
+        for msg in stored:
+            if msg.role == Role.USER.value:
+                if pending is not None:
+                    turns.append(pending)
+                pending = Turn(
+                    user_text=msg.content,
+                    intent=msg.intent,
+                    timestamp=msg.timestamp,
+                    is_private=msg.is_private,
+                    _persisted=True,
+                )
+            elif msg.role == Role.ASSISTANT.value:
+                if pending is None:
+                    pending = Turn(user_text="", timestamp=msg.timestamp, _persisted=True)
+                pending.assistant_text = msg.content
+                if msg.intent:
+                    pending.intent = msg.intent
+                pending.is_private = pending.is_private or msg.is_private
+                turns.append(pending)
+                pending = None
+        if pending is not None:
+            turns.append(pending)
+
+        self._turns = turns[-limit:]
+        return len(self._turns)
+
     # -- lifecycle ---------------------------------------------------------
 
     def clear(self) -> None:
-        """Drop all history (e.g. on a new session) but keep the session id."""
+        """Drop all in-memory history but keep the session id and store.
+
+        Pending (unpersisted) turns are flushed first so disabling the buffer
+        never silently loses durable history.
+        """
+        self.flush()
         self._turns.clear()
 
     def reset_session(self) -> str:
-        """Start a fresh session: new id, cleared history. Returns new id."""
+        """Start a fresh session: new id, cleared history. Returns new id.
+
+        Any pending turns from the old session are flushed to the store first,
+        and the new session is registered with the store if one is attached.
+        """
+        self.flush()
         self.session_id = uuid.uuid4().hex
         self.created_at = time.time()
         self._turns.clear()
+        if self.store is not None:
+            try:
+                self.store.ensure_session(self.session_id)
+            except Exception:  # pragma: no cover - storage faults are non-fatal
+                logger.exception("Could not register new session in store; continuing")
         return self.session_id
 
     # -- future memory integration hook -----------------------------------
@@ -154,9 +320,10 @@ class ConversationManager:
     def to_memory_records(self) -> List[Dict]:
         """Serialize turns into a persistence-friendly shape.
 
-        This is the seam for Phase 3 long-term memory: a future ``MemoryStore``
-        can consume these records to persist/index the conversation without any
-        change to callers of :class:`ConversationManager`.
+        This is the seam used by the M5.1 long-term store: a
+        :class:`~mimosa.memory.conversation_store.ConversationStore` consumes
+        these records to persist/index the conversation without any change to
+        callers of :class:`ConversationManager`.
         """
         return [
             {
@@ -165,6 +332,7 @@ class ConversationManager:
                 "assistant_text": t.assistant_text,
                 "intent": t.intent,
                 "timestamp": t.timestamp,
+                "is_private": t.is_private,
             }
             for t in self._turns
         ]
