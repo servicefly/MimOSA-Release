@@ -41,5 +41,22 @@ send2trash>=1.8,<2.2           # Cross-platform "move to Trash" for safe deletes
 PyGObject>=3.42,<3.52          # GTK4 bindings for the avatar window (optional)
 pycairo>=1.20                  # Cairo drawing for avatar animations (optional)
 
+# --- Memory & Context: semantic recall (M5.3) ---
+# OPTIONAL. Semantic memory degrades gracefully: when these are absent MimOSA
+# falls back to a pure-Python, dependency-free embedder + in-process vector
+# store (deterministic, fully offline), so conversation recall still works —
+# just lexically rather than with learned embeddings. Install these for true
+# on-device semantic recall:
+#     pip install "chromadb>=0.4,<0.6" "sentence-transformers>=2.2,<4.0"
+# sentence-transformers pulls in PyTorch (large download). Everything runs
+# locally; no data ever leaves the device.
+# chromadb>=0.4,<0.6           # Local vector store (optional, M5.3)
+# sentence-transformers>=2.2   # On-device embeddings (optional, M5.3)
+
+# --- Memory & Context: encrypted private store (M5.4, optional/future) ---
+# The Privacy Guard keeps sensitive turns on-device today via the is_private
+# flag + local-only routing. An encrypted SQLCipher private store is optional:
+# sqlcipher3-binary>=0.5        # Encrypted private.db (optional, M5.4)
+
 # --- Testing ---
 pytest>=8.0,<9.0               # Test runner for the automated test suite
