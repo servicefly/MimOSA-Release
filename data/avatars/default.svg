@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MimOSA default avatar (M3.1).
+  A simple, scalable circular glyph used as a static fallback / app icon.
+  The live desktop avatar is drawn procedurally with Cairo (see
+  mimosa/ui/avatar_renderer.py); this SVG is the resolution-independent
+  resting design and packaging icon.
+-->
+<svg xmlns="https://cdn.dribbble.com/users/60166/screenshots/3813731/logo_project.jpg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="disc" cx="50%" cy="42%" r="62%">
+      <stop offset="0%" stop-color="#222a3d"/>
+      <stop offset="100%" stop-color="#171b29"/>
+    </radialGradient>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#5ca6f0"/>
+      <stop offset="70%" stop-color="#5ca6f0" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#5ca6f0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="100" cy="100" r="86" fill="url(#disc)"/>
+  <circle cx="100" cy="100" r="86" fill="none" stroke="#5ca6f0" stroke-width="6" stroke-opacity="0.9"/>
+  <circle cx="100" cy="100" r="48" fill="url(#core)"/>
+</svg>

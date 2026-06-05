@@ -18,7 +18,11 @@ llama.cpp) with no code changes.
 > (launch/close apps via the `.desktop` catalog, plus volume/brightness/Wi-Fi/
 > battery), and **M2.3 — Kubuntu 26.04 Integration** (OS/hardware profiling, KDE
 > Plasma D-Bus integration, hardware-aware optimization, and a voice
-> `SystemInfoSkill`). All **397 automated tests** pass offline.
+> `SystemInfoSkill`). **Phase 3 (UI & Avatar) has begun:** **M3.1 — GTK4 Window
+> Design** adds an optional circular, always-on-top desktop **avatar** that
+> animates with the assistant's state (idle / listening / processing /
+> speaking), with full headless fallback. All **518 automated tests** pass
+> offline.
 
 ---
 
@@ -383,6 +387,44 @@ The logic lives in
 [`mimosa/skills/system_info.py`](mimosa/skills/system_info.py). See
 [`docs/KUBUNTU_INTEGRATION.md`](docs/KUBUNTU_INTEGRATION.md) for the full design,
 hardware requirements, and optional dependencies.
+
+---
+
+## 🪟 Desktop avatar (M3.1 — UI & avatar)
+
+MimOSA gets an optional **desktop presence**: a small, circular,
+**frameless, transparent, always-on-top** window that animates with the
+assistant's state.
+
+- **Visual states** — IDLE (breathing glow), LISTENING (expanding rings),
+  PROCESSING (thinking dots), SPEAKING (audio-reactive level bar), each
+  color-coded by theme with smooth eased transitions. Drawn procedurally with
+  **Cairo** (no raster assets required).
+- **Window** — draggable (position is persisted), right-click menu
+  (Settings / Hide / Quit), Escape to hide, multi-monitor aware, Wayland/X11
+  compatible (best-effort positioning on strict Wayland).
+- **Thread-safe** — the voice loop runs on a worker thread; a `StateBridge`
+  marshals state changes onto the GTK main thread via `GLib.idle_add`. A UI
+  fault can never crash the voice loop.
+- **Optional & private** — runs **headless** (voice/CLI, no GTK imported) when
+  no display or GTK 4 is available, or with `--no-gui`. No telemetry;
+  preferences live in `~/.config/mimosa/ui.json`.
+
+```bash
+python -m mimosa.ui.app --check     # report GUI/headless readiness
+python -m mimosa.ui.app --no-gui    # force headless
+python -m mimosa.ui.app             # GUI if available, else headless
+```
+
+Implemented in [`mimosa/ui/`](mimosa/ui/) —
+[`app.py`](mimosa/ui/app.py), [`avatar_window.py`](mimosa/ui/avatar_window.py),
+[`avatar_renderer.py`](mimosa/ui/avatar_renderer.py),
+[`state_bridge.py`](mimosa/ui/state_bridge.py),
+[`window_manager.py`](mimosa/ui/window_manager.py),
+[`ui_config.py`](mimosa/ui/ui_config.py),
+[`environment.py`](mimosa/ui/environment.py). See
+[`docs/UI_ARCHITECTURE.md`](docs/UI_ARCHITECTURE.md) for the full design,
+threading model, and GTK4 install instructions for Kubuntu 26.04.
 
 ---
 

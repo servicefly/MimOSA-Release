@@ -32,5 +32,14 @@ pyaudio>=0.2.13,<0.3           # Microphone capture / playback (needs PortAudio)
 psutil>=5.9,<8.0               # CPU / RAM / process monitoring; app process control (M2.2)
 send2trash>=1.8,<2.2           # Cross-platform "move to Trash" for safe deletes (M2.1)
 
+# --- UI: GTK4 desktop avatar (M3.1) ---
+# OPTIONAL. The avatar is graceful-degradation: MimOSA runs headless (voice/CLI)
+# when these are absent. PyGObject also needs system packages (Kubuntu/Debian):
+#     sudo apt install python3-gi gir1.2-gtk-4.0 libgirepository1.0-dev \
+#                      libcairo2-dev gobject-introspection
+# On older typelibs (GLib < 2.80, e.g. Debian 12) pin PyGObject to <3.52.
+PyGObject>=3.42,<3.52          # GTK4 bindings for the avatar window (optional)
+pycairo>=1.20                  # Cairo drawing for avatar animations (optional)
+
 # --- Testing ---
 pytest>=8.0,<9.0               # Test runner for the automated test suite
