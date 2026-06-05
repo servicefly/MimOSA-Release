@@ -220,7 +220,26 @@ class VoiceLoop:
                 logger.warning("Could not create LLM provider (%s); "
                                "LLM-backed skills will degrade.", exc)
                 provider = None
-            self._router = IntentRouter(llm_provider=provider)
+
+            # Load user-defined custom skills (M4.1) from the unified config so
+            # the user's own commands are active. Best-effort: a missing/corrupt
+            # config simply means no custom skills.
+            custom_skills = []
+            try:
+                from mimosa.skills.custom_skill import build_custom_skills
+                from mimosa.utils.config import AppConfigManager
+
+                cfg = AppConfigManager()
+                cfg.load()
+                custom_skills = build_custom_skills(
+                    cfg.get().skills.custom_specs(), llm_provider=provider
+                )
+            except Exception as exc:  # pragma: no cover - config optional
+                logger.debug("Could not load custom skills (%s)", exc)
+
+            self._router = IntentRouter(
+                llm_provider=provider, custom_skills=custom_skills
+            )
         return self._router
 
     @property

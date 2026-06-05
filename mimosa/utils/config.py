@@ -203,9 +203,56 @@ class SkillsSettings:
             if sid not in self.order:
                 self.order.append(sid)
 
+        # Normalise custom user-defined skills (M4.1). Each entry is stored as a
+        # plain dict; we round-trip through CustomSkillSpec so a hand-edited file
+        # is repaired rather than trusted blindly. Unusable entries are dropped.
         if not isinstance(self.custom, list):
             self.custom = []
+        else:
+            from mimosa.skills.custom_skill import CustomSkillSpec
+
+            cleaned_custom: List[Dict[str, Any]] = []
+            seen_ids: set = set()
+            for entry in self.custom:
+                try:
+                    spec = CustomSkillSpec.from_dict(
+                        entry if isinstance(entry, dict) else {}
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    continue
+                if not spec.id or not spec.is_usable() or spec.id in seen_ids:
+                    continue
+                seen_ids.add(spec.id)
+                cleaned_custom.append(spec.to_dict())
+            self.custom = cleaned_custom
         return self
+
+    def custom_specs(self):
+        """Return the validated custom skills as ``CustomSkillSpec`` objects."""
+        from mimosa.skills.custom_skill import CustomSkillSpec
+
+        return [CustomSkillSpec.from_dict(entry) for entry in self.custom]
+
+    def add_custom_skill(self, spec) -> Dict[str, Any]:
+        """Add or replace (by id) a custom skill; returns the stored dict.
+
+        ``spec`` may be a :class:`CustomSkillSpec` or a plain dict. Raises
+        :class:`~mimosa.skills.custom_skill.CustomSkillError` if it is not a
+        usable skill (needs a name, a trigger, and a response/LLM prompt).
+        """
+        from mimosa.skills.custom_skill import normalize_custom_spec
+
+        normalized = normalize_custom_spec(spec)
+        payload = normalized.to_dict()
+        self.custom = [c for c in self.custom if c.get("id") != normalized.id]
+        self.custom.append(payload)
+        return payload
+
+    def remove_custom_skill(self, skill_id: str) -> bool:
+        """Remove a custom skill by id. Returns ``True`` if one was removed."""
+        before = len(self.custom)
+        self.custom = [c for c in self.custom if c.get("id") != str(skill_id)]
+        return len(self.custom) < before
 
     def is_enabled(self, skill_id: str) -> bool:
         return bool(self.enabled.get(skill_id, True))

@@ -28,6 +28,11 @@ Future modules: ``file_ops.py``, ``app_launcher.py``, ``research.py``,
 from mimosa.skills.application import ApplicationSkill
 from mimosa.skills.base_skill import BaseSkill, SkillResult
 from mimosa.skills.calculator_skill import CalculatorSkill
+from mimosa.skills.custom_skill import (
+    CustomSkill,
+    CustomSkillSpec,
+    build_custom_skills,
+)
 from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
@@ -39,6 +44,9 @@ from mimosa.skills.weather_skill import WeatherSkill
 __all__ = [
     "BaseSkill",
     "SkillResult",
+    "CustomSkill",
+    "CustomSkillSpec",
+    "build_custom_skills",
     "TimeSkill",
     "CalculatorSkill",
     "WeatherSkill",
