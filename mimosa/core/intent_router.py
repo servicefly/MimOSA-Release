@@ -53,6 +53,7 @@ from mimosa.llm.base_provider import LLMError, Message, Role
 from mimosa.skills.application import ApplicationSkill
 from mimosa.skills.base_skill import BaseSkill, SkillResult
 from mimosa.skills.calculator_skill import CalculatorSkill
+from mimosa.skills.custom_skill import CustomSkill
 from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
@@ -269,6 +270,7 @@ class IntentRouter:
         llm_provider=None,
         confidence_threshold: Optional[float] = None,
         skills: Optional[List[BaseSkill]] = None,
+        custom_skills: Optional[List[CustomSkill]] = None,
     ) -> None:
         self.llm = llm_provider
         self.confidence_threshold = (
@@ -292,8 +294,12 @@ class IntentRouter:
             ]
         self._skills: List[BaseSkill] = []
         self._by_intent: Dict[str, BaseSkill] = {}
+        #: User-defined custom skills (M4.1), matched before the LLM fallback.
+        self._custom_skills: List[CustomSkill] = []
         for skill in skills:
             self.register_skill(skill)
+        if custom_skills:
+            self.set_custom_skills(custom_skills)
 
     # -- registration ------------------------------------------------------
 
@@ -302,12 +308,48 @@ class IntentRouter:
         self._skills.append(skill)
         for intent in skill.intents:
             self._by_intent[intent] = skill
+        if isinstance(skill, CustomSkill) and skill not in self._custom_skills:
+            self._custom_skills.append(skill)
         logger.debug("Registered skill %r for intents %s", skill.name, skill.intents)
+
+    def set_custom_skills(self, custom_skills: List[CustomSkill]) -> None:
+        """Replace the active set of custom skills (M4.1).
+
+        Removes any previously-registered custom skills (from both the skill
+        list and the intent index) and registers the new set. Lets the app
+        live-refresh custom skills when the user edits them in Settings without
+        rebuilding the whole router.
+        """
+        # Drop the old custom skills.
+        old = set(id(s) for s in self._custom_skills)
+        self._skills = [s for s in self._skills if id(s) not in old]
+        for cs in self._custom_skills:
+            for intent in cs.intents:
+                if self._by_intent.get(intent) is cs:
+                    del self._by_intent[intent]
+        self._custom_skills = []
+        for cs in custom_skills or []:
+            self.register_skill(cs)
 
     @property
     def skills(self) -> List[BaseSkill]:
         """The registered skills."""
         return list(self._skills)
+
+    @property
+    def custom_skills(self) -> List[CustomSkill]:
+        """The registered user-defined custom skills (M4.1)."""
+        return list(self._custom_skills)
+
+    def _match_custom_skill(self, text: str) -> Optional[CustomSkill]:
+        """Return the first enabled custom skill whose triggers match ``text``."""
+        for cs in self._custom_skills:
+            try:
+                if cs.matches(text):
+                    return cs
+            except Exception:  # pragma: no cover - a bad custom skill is non-fatal
+                logger.exception("Custom skill %r match failed", cs.name)
+        return None
 
     # -- classification ----------------------------------------------------
 
@@ -339,6 +381,14 @@ class IntentRouter:
             return IntentClassification(INTENT_APPLICATION, 0.9, source="heuristic")
         if _matches_any(lowered, _GREETING_PATTERNS):
             return IntentClassification(INTENT_GREETING, 0.9, source="heuristic")
+
+        # Tier 1c: user-defined custom skills (M4.1). Checked after the built-in
+        # heuristics (so core commands keep priority) but before the question /
+        # LLM fallback, so a matching custom command is answered locally with
+        # zero classification cost.
+        custom = self._match_custom_skill(text)
+        if custom is not None:
+            return IntentClassification(custom.intents[0], 0.9, source="custom")
 
         # Tier 1b: clearly question-shaped utterances route straight to the
         # question skill. This is a deliberate cost optimization -- a question
