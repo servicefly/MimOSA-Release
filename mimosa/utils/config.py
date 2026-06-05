@@ -361,6 +361,7 @@ class AppConfig:
     """
 
     version: int = CONFIG_VERSION
+    first_run_complete: bool = False  # set once the setup wizard finishes (M4.2)
     voice: VoiceSettings = field(default_factory=VoiceSettings)
     skills: SkillsSettings = field(default_factory=SkillsSettings)
     system: SystemIntegrationSettings = field(default_factory=SystemIntegrationSettings)
@@ -372,6 +373,7 @@ class AppConfig:
             self.version = int(self.version)
         except (TypeError, ValueError):
             self.version = CONFIG_VERSION
+        self.first_run_complete = bool(self.first_run_complete)
         self.voice.validate()
         self.skills.validate()
         self.system.validate()
@@ -382,6 +384,7 @@ class AppConfig:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
+            "first_run_complete": self.first_run_complete,
             "voice": asdict(self.voice),
             "skills": asdict(self.skills),
             "system": asdict(self.system),
@@ -404,6 +407,7 @@ class AppConfig:
 
         cfg = cls(
             version=data.get("version", CONFIG_VERSION),
+            first_run_complete=bool(data.get("first_run_complete", False)),
             voice=_section(VoiceSettings, "voice"),
             skills=_section(SkillsSettings, "skills"),
             system=_section(SystemIntegrationSettings, "system"),
@@ -597,6 +601,21 @@ class AppConfigManager:
                 else:
                     raise KeyError(f"{section}.{key} is not a valid field")
             self._config.validate()
+        if persist:
+            self.save()
+        else:
+            self._notify()
+        return self._config
+
+    def is_first_run(self) -> bool:
+        """Whether the first-run setup wizard has *not* yet been completed (M4.2)."""
+        with self._lock:
+            return not bool(self._config.first_run_complete)
+
+    def mark_first_run_complete(self, *, persist: bool = True) -> AppConfig:
+        """Record that the setup wizard finished (so it won't show again)."""
+        with self._lock:
+            self._config.first_run_complete = True
         if persist:
             self.save()
         else:

@@ -420,3 +420,16 @@ class SettingsController:
 
     def privacy_summary(self) -> str:
         return self._working.privacy.privacy_summary()
+
+    def check_for_updates(self, checker=None):
+        """Check for a newer MimOSA release (About page action, M4.2).
+
+        Returns an :class:`~mimosa.utils.updates.UpdateInfo`. The ``checker`` is
+        injectable for tests; by default a network-backed
+        :class:`~mimosa.utils.updates.UpdateChecker` is used. Never raises --
+        failures are reported via ``UpdateInfo.error``.
+        """
+        from mimosa.utils.updates import UpdateChecker
+
+        chk = checker or UpdateChecker()
+        return chk.check()
