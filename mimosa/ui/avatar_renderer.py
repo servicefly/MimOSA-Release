@@ -25,12 +25,17 @@ import logging
 import math
 from typing import Dict, Optional, Tuple
 
+from mimosa.ui.audio_sync import AudioVisemeSync
+from mimosa.ui.mouth_animator import MouthAnimator
 from mimosa.ui.state_bridge import UIState
 from mimosa.ui.ui_config import COLOR_THEMES, DEFAULT_THEME
+from mimosa.ui.viseme_mapper import Viseme
 
 logger = logging.getLogger(__name__)
 
 Color = Tuple[float, float, float]
+
+_SILENCE_VISEME = Viseme.SILENCE
 
 # Duration (seconds) of the cross-fade between two states.
 TRANSITION_SECONDS = 0.35
@@ -76,6 +81,13 @@ class AvatarRenderer:
         animation_style: str = "pulse",
         animation_speed: float = 1.0,
         animations_enabled: bool = True,
+        lipsync_enabled: bool = True,
+        mouth_style: str = "natural",
+        viseme_speed: float = 14.0,
+        lipsync_latency: float = 0.05,
+        lipsync_debug: bool = False,
+        mouth_animator: Optional[MouthAnimator] = None,
+        audio_sync: Optional[AudioVisemeSync] = None,
     ) -> None:
         self.theme = theme if theme in COLOR_THEMES else DEFAULT_THEME
         self.animation_style = animation_style
@@ -88,6 +100,17 @@ class AvatarRenderer:
         self._phase = 0.0          # ever-advancing animation phase (seconds * speed)
         self._transition = 1.0     # 0..1 progress of prev->current cross-fade
         self._audio_level = 0.0    # 0..1 external level for SPEAKING reactivity
+
+        # -- lip-sync (M3.2) ------------------------------------------------
+        self.lipsync_enabled = bool(lipsync_enabled)
+        self.lipsync_debug = bool(lipsync_debug)
+        self._mouth = mouth_animator or MouthAnimator(
+            interpolation_speed=viseme_speed, style=mouth_style
+        )
+        self._sync = audio_sync or AudioVisemeSync(latency_offset=lipsync_latency)
+        # True from the moment a timeline is set until SPEAKING ends, so the
+        # mouth (not the fallback bar) is drawn for the whole utterance.
+        self._lipsync_engaged = False
 
     # -- public state API --------------------------------------------------
 
@@ -120,6 +143,11 @@ class AvatarRenderer:
         self._prev_state = self._state
         self._state = state
         self._transition = 0.0
+        # Leaving SPEAKING: end any lip-sync session so the mouth eases shut and
+        # the fallback bar is not shown on the next utterance by mistake.
+        if state is not UIState.SPEAKING:
+            self._sync.stop()
+            self._lipsync_engaged = False
 
     def set_audio_level(self, level: float) -> None:
         """Feed a 0..1 audio level used to make the SPEAKING animation reactive."""
@@ -127,6 +155,62 @@ class AvatarRenderer:
             self._audio_level = max(0.0, min(1.0, float(level)))
         except (TypeError, ValueError):
             self._audio_level = 0.0
+
+    # -- lip-sync API (M3.2) ----------------------------------------------
+
+    def set_viseme_timeline(self, timeline) -> None:
+        """Begin lip-syncing to ``timeline`` (a
+        :class:`~mimosa.voice.phoneme_extractor.VisemeTimeline`).
+
+        Safe to call regardless of state; it anchors the audio-sync clock to
+        *now*. When ``lipsync_enabled`` is ``False`` or the timeline is empty,
+        this is a no-op and the basic speaking animation is used instead.
+        """
+        if not self.lipsync_enabled or timeline is None or timeline.is_empty:
+            return
+        self._sync.start(timeline)
+        self._lipsync_engaged = True
+
+    def clear_viseme_timeline(self) -> None:
+        """Stop lip-sync immediately (mouth eases back to rest)."""
+        self._sync.stop()
+        self._lipsync_engaged = False
+
+    def set_lipsync_enabled(self, enabled: bool) -> None:
+        """Toggle the lip-sync feature at runtime."""
+        self.lipsync_enabled = bool(enabled)
+        if not self.lipsync_enabled:
+            self.clear_viseme_timeline()
+
+    @property
+    def lipsync_active(self) -> bool:
+        """True while a viseme timeline is engaged for the current utterance."""
+        return self._lipsync_engaged
+
+    @property
+    def audio_sync(self) -> AudioVisemeSync:
+        """The underlying :class:`AudioVisemeSync` (for resync/pause/resume)."""
+        return self._sync
+
+    @property
+    def mouth(self) -> MouthAnimator:
+        """The underlying :class:`MouthAnimator` (current mouth shape, etc.)."""
+        return self._mouth
+
+    @classmethod
+    def from_config(cls, config) -> "AvatarRenderer":
+        """Build a renderer from a :class:`~mimosa.ui.ui_config.UIConfig`."""
+        return cls(
+            theme=config.theme,
+            animation_style=config.animation_style,
+            animation_speed=config.animation_speed,
+            animations_enabled=config.animations_enabled,
+            lipsync_enabled=getattr(config, "lipsync_enabled", True),
+            mouth_style=getattr(config, "mouth_style", "natural"),
+            viseme_speed=getattr(config, "viseme_speed", 14.0),
+            lipsync_latency=getattr(config, "lipsync_latency", 0.05),
+            lipsync_debug=getattr(config, "lipsync_debug", False),
+        )
 
     # -- animation math (pure) --------------------------------------------
 
@@ -147,6 +231,28 @@ class AvatarRenderer:
             self._phase += dt * self.animation_speed
         if self._transition < 1.0:
             self._transition = min(1.0, self._transition + dt / TRANSITION_SECONDS)
+        self._tick_lipsync(dt)
+
+    def _tick_lipsync(self, dt: float) -> None:
+        """Advance the mouth animator from the audio-sync window each frame.
+
+        While a timeline is engaged we sample ``(current, next, blend)`` from the
+        sync clock and steer the mouth toward it; once playback runs past the
+        timeline we let the mouth ease back to rest (target = silence). Cheap and
+        exception-safe so a lip-sync glitch never breaks the frame loop.
+        """
+        if not self.lipsync_enabled:
+            return
+        try:
+            if self._lipsync_engaged and self._sync.active and not self._sync.is_finished():
+                cur, nxt, blend = self._sync.current_window()
+                self._mouth.set_window(cur, nxt, blend)
+            elif self._lipsync_engaged:
+                # Past the end of the timeline: ease the mouth closed.
+                self._mouth.set_target_viseme(_SILENCE_VISEME)
+            self._mouth.update(dt)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("lip-sync tick failed: %s", exc)
 
     def base_color(self) -> Color:
         """The themed background disc color."""
@@ -288,6 +394,16 @@ class AvatarRenderer:
             cr.fill()
 
     def _draw_speaking(self, cr, cx, cy, radius, accent, cairo) -> None:
+        # Lip-sync path: draw the animated mouth layered over the avatar base.
+        if self.lipsync_enabled and self._lipsync_engaged:
+            self._mouth.draw(cr, cx, cy, radius * 1.05, accent, cairo)
+            if self.lipsync_debug:
+                self._draw_lipsync_debug(cr, cx, cy, radius, cairo)
+            return
+        # Fallback: the original reactive "mouth bar".
+        self._draw_speaking_bar(cr, cx, cy, radius, accent)
+
+    def _draw_speaking_bar(self, cr, cx, cy, radius, accent) -> None:
         level = self.speaking_level()
         # A symmetric "mouth" bar that grows with the level.
         bar_w = radius * 1.0
@@ -304,3 +420,19 @@ class AvatarRenderer:
         cr.arc(x + radius_corner, y + bar_h - radius_corner, radius_corner, 0.5 * math.pi, math.pi)
         cr.close_path()
         cr.fill()
+
+    def _draw_lipsync_debug(self, cr, cx, cy, radius, cairo) -> None:
+        """Overlay the current viseme name + playback position for tuning."""
+        try:
+            cur, nxt, blend = self._sync.current_window()
+            pos = self._sync.position()
+            dur = self._sync.timeline.duration
+            label = f"{cur.value}->{nxt.value} {blend:.2f} | {pos:.2f}/{dur:.2f}s"
+            cr.save()
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.85)
+            cr.set_font_size(max(8.0, radius * 0.10))
+            cr.move_to(cx - radius * 0.9, cy + radius * 0.85)
+            cr.show_text(label)
+            cr.restore()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("lip-sync debug overlay failed: %s", exc)

@@ -22,6 +22,21 @@ Modules (M3.1 -- GTK4 window design)
 * :mod:`mimosa.ui.app` -- application entry point; chooses GUI vs headless and
   runs the voice loop with or without the avatar.
 
+Modules (M3.2 -- enhanced TTS / viseme lip-sync)
+------------------------------------------------
+* :mod:`mimosa.ui.viseme_mapper` -- canonical :class:`~mimosa.ui.viseme_mapper.Viseme`
+  set and a configurable IPA/eSpeak phoneme -> viseme table. Pure data.
+* :mod:`mimosa.ui.audio_sync` -- :class:`~mimosa.ui.audio_sync.AudioVisemeSync`
+  tracks playback position over a viseme timeline (injectable clock, latency
+  compensation, pause/resume, adaptive resync). Pure, testable.
+* :mod:`mimosa.ui.mouth_animator` -- Cairo mouth-shape rendering with smooth,
+  frame-rate-independent interpolation between visemes (math is pure; drawing
+  lazily imports cairo).
+
+  The companion :mod:`mimosa.voice.phoneme_extractor` (voice package) turns text
+  + synthesized audio into a :class:`~mimosa.voice.phoneme_extractor.VisemeTimeline`,
+  preferring phonemes and falling back to amplitude analysis -- all on-device.
+
 Design guarantees (consistent with the rest of MimOSA)
 ------------------------------------------------------
 * **Optional & graceful.** Importing this package never requires GTK. The

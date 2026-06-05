@@ -78,6 +78,16 @@ DEFAULT_THEME = "aurora"
 ANIMATION_STYLES = ("pulse", "rings", "waveform", "minimal")
 DEFAULT_ANIMATION_STYLE = "pulse"
 
+# -- lip-sync (M3.2) ---------------------------------------------------------
+
+MIN_VISEME_SPEED = 1.0
+MAX_VISEME_SPEED = 40.0
+DEFAULT_VISEME_SPEED = 14.0
+
+#: Visual styles for the animated mouth (see :mod:`mimosa.ui.mouth_animator`).
+MOUTH_STYLES = ("natural", "cartoon", "minimal")
+DEFAULT_MOUTH_STYLE = "natural"
+
 
 def default_config_path() -> Path:
     """Return the default UI-config path, honoring ``MIMOSA_UI_CONFIG`` & XDG.
@@ -129,6 +139,13 @@ class UIConfig:
     # behavior
     start_hidden: bool = False
 
+    # lip-sync (M3.2)
+    lipsync_enabled: bool = True
+    viseme_speed: float = DEFAULT_VISEME_SPEED  # mouth interpolation snappiness
+    mouth_style: str = DEFAULT_MOUTH_STYLE      # natural | cartoon | minimal
+    lipsync_latency: float = 0.05               # audio buffering compensation (s)
+    lipsync_debug: bool = False                 # overlay viseme timing for tuning
+
     def validate(self) -> "UIConfig":
         """Clamp/normalize all fields in place and return self.
 
@@ -163,9 +180,27 @@ class UIConfig:
         if self.animation_style not in ANIMATION_STYLES:
             self.animation_style = DEFAULT_ANIMATION_STYLE
 
+        if self.mouth_style not in MOUTH_STYLES:
+            self.mouth_style = DEFAULT_MOUTH_STYLE
+
+        try:
+            self.viseme_speed = round(
+                _clamp(float(self.viseme_speed), MIN_VISEME_SPEED, MAX_VISEME_SPEED), 3
+            )
+        except (TypeError, ValueError):
+            self.viseme_speed = DEFAULT_VISEME_SPEED
+
+        try:
+            # Latency compensation kept within a sane window (matches AudioVisemeSync).
+            self.lipsync_latency = round(_clamp(float(self.lipsync_latency), -0.5, 1.0), 3)
+        except (TypeError, ValueError):
+            self.lipsync_latency = 0.05
+
         self.always_on_top = bool(self.always_on_top)
         self.animations_enabled = bool(self.animations_enabled)
         self.start_hidden = bool(self.start_hidden)
+        self.lipsync_enabled = bool(self.lipsync_enabled)
+        self.lipsync_debug = bool(self.lipsync_debug)
 
         for attr in ("pos_x", "pos_y"):
             val = getattr(self, attr)

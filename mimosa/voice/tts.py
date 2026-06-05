@@ -33,7 +33,10 @@ import io
 import logging
 import os
 import wave
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, Tuple
+
+if TYPE_CHECKING:  # avoid an import-time UI dependency; only for type hints
+    from mimosa.voice.phoneme_extractor import PhonemeExtractor, VisemeTimeline
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +199,62 @@ class PiperTTS:
             raise TTSError(f"Piper synthesis failed: {exc}") from exc
 
         return buffer.getvalue()
+
+    def synthesize_with_visemes(
+        self,
+        text: str,
+        extractor: "Optional[PhonemeExtractor]" = None,
+    ) -> "Tuple[bytes, VisemeTimeline]":
+        """Synthesize ``text`` and build a lip-sync :class:`VisemeTimeline`.
+
+        Returns ``(wav_bytes, timeline)``. Audio synthesis behaves exactly like
+        :meth:`synthesize`; the viseme timeline is produced from the loaded
+        Piper voice's phonemes when possible, otherwise from the audio's energy
+        envelope. **Viseme extraction never raises** -- on any failure the
+        timeline is empty and callers simply fall back to the basic speaking
+        animation. The audio is always returned regardless.
+
+        This method holds no shared mutable state: the returned WAV bytes and
+        timeline are fresh per call, so it is safe to call from the voice worker
+        thread while the GTK thread renders a previous timeline.
+
+        Args:
+            text: The text to speak.
+            extractor: Optional :class:`PhonemeExtractor`; one is created lazily
+                when omitted. Injectable for tests / custom phonemizers.
+        """
+        wav_bytes = self.synthesize(text)
+        timeline = self._extract_visemes(text, wav_bytes, extractor)
+        return wav_bytes, timeline
+
+    def _extract_visemes(
+        self,
+        text: str,
+        wav_bytes: bytes,
+        extractor: "Optional[PhonemeExtractor]" = None,
+    ) -> "VisemeTimeline":
+        """Build a viseme timeline for ``text``/``wav_bytes``; never raises."""
+        # Lazy import so importing tts.py does not pull in the UI/viseme stack.
+        try:
+            from mimosa.voice.phoneme_extractor import (
+                PhonemeExtractor,
+                VisemeTimeline,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Phoneme extractor unavailable: %s", exc)
+            class _Empty:  # minimal stand-in so callers get a falsy timeline
+                is_empty = True
+                frames = []
+                duration = 0.0
+                source = "empty"
+            return _Empty()  # type: ignore[return-value]
+
+        ext = extractor or PhonemeExtractor()
+        try:
+            return ext.extract(text=text, wav_bytes=wav_bytes, voice=self._voice_obj)
+        except Exception as exc:  # pragma: no cover - extract() is already safe
+            logger.warning("Viseme extraction failed (%s); empty timeline", exc)
+            return VisemeTimeline.empty()
 
     def synthesize_to_file(self, text: str, path: str) -> str:
         """Synthesize ``text`` and write the WAV to ``path``; return ``path``."""
