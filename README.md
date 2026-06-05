@@ -18,14 +18,17 @@ llama.cpp) with no code changes.
 > (launch/close apps via the `.desktop` catalog, plus volume/brightness/Wi-Fi/
 > battery), and **M2.3 — Kubuntu 26.04 Integration** (OS/hardware profiling, KDE
 > Plasma D-Bus integration, hardware-aware optimization, and a voice
-> `SystemInfoSkill`). **Phase 3 (UI & Avatar) is underway:** **M3.1 — GTK4 Window
+> `SystemInfoSkill`). **Phase 3 (UI & Avatar) is complete:** **M3.1 — GTK4 Window
 > Design** adds an optional circular, always-on-top desktop **avatar** that
 > animates with the assistant's state (idle / listening / processing /
-> speaking), and **M3.2 — Enhanced TTS / Lip-Sync** gives the avatar a mouth
+> speaking), **M3.2 — Enhanced TTS / Lip-Sync** gives the avatar a mouth
 > that syncs to spoken audio using **on-device** Piper phonemes (with an
-> amplitude-envelope fallback) — no network, no third-party APIs. Both degrade
-> gracefully to a full headless fallback. All **682 automated tests** pass
-> offline.
+> amplitude-envelope fallback), and **M3.3 — Settings & Preferences UI**
+> completes the phase with a GTK4 multi-page settings dialog (Voice, Skills,
+> System Integration, Privacy & Data, Appearance, About) backed by a unified,
+> versioned, thread-safe config manager. **Phase 3 is complete.** Everything
+> degrades gracefully to a full headless fallback, every setting is stored
+> locally with **no telemetry**, and all **721 automated tests** pass offline.
 
 ---
 
@@ -457,6 +460,43 @@ Implemented in [`mimosa/ui/viseme_mapper.py`](mimosa/ui/viseme_mapper.py),
 `tts.py` / `avatar_renderer.py` updates). See
 [`docs/VISEME_SYSTEM.md`](docs/VISEME_SYSTEM.md) for the mapping table, timing
 model, and fallback chain.
+
+---
+
+## ⚙️ Settings & preferences (M3.3 — settings UI)
+
+Every preference is editable from a **multi-page GTK4 settings dialog**, opened
+from the avatar's right-click menu, with the keyboard shortcut **Ctrl + ,**
+(the conventional "Preferences" accelerator), or programmatically. The dialog is
+modal to the avatar and offers **Apply / Cancel / OK** with live preview of UI
+changes.
+
+| Page | What you can tune |
+|------|-------------------|
+| **Voice** | Wake word + sensitivity, speech-to-text model, TTS voice & speed, input/output audio devices |
+| **Skills** | Enable/disable each skill and reorder their **priority** (top = matched first) |
+| **System Integration** | Toggle file operations / app control / system controls, **safe mode**, and per-action confirmation prompts |
+| **Privacy & Data** | LLM provider (`abacus` / `local` / **`none`** = fully offline), conversation-history limit, retention, **clear history**, and a live privacy summary |
+| **Appearance** | Avatar size, opacity, color scheme, animation style/speed, always-on-top, lip-sync, mouth style |
+| **About** | Version, system summary, license, and credits |
+
+All settings persist to a single local JSON file
+(`~/.config/mimosa/settings.json`, override with `MIMOSA_CONFIG`) via a
+**unified, versioned, thread-safe** config manager
+([`mimosa/utils/config.py`](mimosa/utils/config.py)). The manager migrates older
+config layouts automatically and mirrors UI preferences back to the legacy
+`ui.json` for backward compatibility. **Nothing is ever sent off the
+device — there is no telemetry.**
+
+The dialog is a thin GTK view over a fully **headless-testable controller**
+([`mimosa/ui/settings_logic.py`](mimosa/ui/settings_logic.py)); the GTK window
+itself lives in
+[`mimosa/ui/settings_dialog.py`](mimosa/ui/settings_dialog.py). See
+[`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for a full walkthrough (with
+screenshots) and [`docs/UI_ARCHITECTURE.md`](docs/UI_ARCHITECTURE.md) for the
+design.
+
+![Settings — Voice page](docs/images/settings_voice.png)
 
 ---
 
