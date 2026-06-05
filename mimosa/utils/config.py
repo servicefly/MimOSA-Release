@@ -303,10 +303,25 @@ class PrivacySettings:
     conversation_history_limit: int = DEFAULT_HISTORY_LIMIT
     store_history: bool = True
     data_retention_days: int = DEFAULT_RETENTION_DAYS
+    #: Persist conversation history to the on-device SQLite store (M5.1) so
+    #: context survives restarts. When False, history is session-only (RAM).
+    persist_conversations: bool = True
+    #: Silent background preference learning (M5.2). When False, MimOSA never
+    #: records behavioural patterns.
+    learn_preferences: bool = True
+    #: Build on-device semantic memory for long-term recall (M5.3).
+    semantic_memory: bool = True
+    #: Let the Privacy Guard (M5.4) auto-detect sensitive topics and route them
+    #: to a local-only model so they never reach the cloud.
+    auto_private_mode: bool = True
 
     def validate(self) -> "PrivacySettings":
         if self.llm_provider not in LLM_PROVIDERS:
             self.llm_provider = DEFAULT_LLM_PROVIDER
+        self.persist_conversations = bool(self.persist_conversations)
+        self.learn_preferences = bool(self.learn_preferences)
+        self.semantic_memory = bool(self.semantic_memory)
+        self.auto_private_mode = bool(self.auto_private_mode)
 
         try:
             self.conversation_history_limit = int(

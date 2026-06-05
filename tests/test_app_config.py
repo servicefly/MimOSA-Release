@@ -215,3 +215,34 @@ def test_manager_replace_without_persist(manager, tmp_path):
     manager.replace(new_cfg, persist=False)
     assert manager.get().privacy.llm_provider == "local"
     assert not target.exists()  # not written when persist=False
+
+
+
+def test_privacy_memory_flags_default_on():
+    p = PrivacySettings()
+    assert p.persist_conversations is True
+    assert p.learn_preferences is True
+    assert p.semantic_memory is True
+    assert p.auto_private_mode is True
+
+
+def test_privacy_memory_flags_coerced_to_bool():
+    p = PrivacySettings(
+        persist_conversations=0,
+        learn_preferences="",
+        semantic_memory=1,
+        auto_private_mode="yes",
+    ).validate()
+    assert p.persist_conversations is False
+    assert p.learn_preferences is False
+    assert p.semantic_memory is True
+    assert p.auto_private_mode is True
+
+
+def test_privacy_memory_flags_roundtrip():
+    cfg = AppConfig()
+    cfg.privacy.persist_conversations = False
+    cfg.privacy.auto_private_mode = False
+    restored = AppConfig.from_dict(cfg.to_dict())
+    assert restored.privacy.persist_conversations is False
+    assert restored.privacy.auto_private_mode is False
