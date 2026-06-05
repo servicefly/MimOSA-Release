@@ -67,6 +67,13 @@ class MimOSAApplication:
         self._gtk_app = None
         self._settings_dialog = None
         self._voice_thread: Optional[threading.Thread] = None
+        # M4.3 companions (all optional / created lazily under GTK).
+        self._tray = None
+        self._chat_controller = None
+        self._chat_window = None
+        from mimosa.ui.expressions import ExpressionController
+
+        self.expressions = ExpressionController()
 
     # -- voice loop --------------------------------------------------------
 
@@ -169,8 +176,20 @@ class MimOSAApplication:
             self._maybe_run_setup_wizard(transient_for=window)
 
             # Bridge voice states -> avatar (thread-safe via GLib.idle_add).
-            self.bridge = StateBridge(on_state_change=window.set_state)
+            # The handler also keeps the expression controller and tray icon in
+            # sync with the current state (M4.3).
+            def _on_state_change(state: UIState) -> None:
+                window.set_state(state)
+                self.expressions.set_state(state)
+                if self._tray is not None:
+                    self._tray.controller.set_state(state)
+                    self._tray.refresh()
+
+            self.bridge = StateBridge(on_state_change=_on_state_change)
             self.bridge.subscribe(self.voice_loop)
+
+            # Optional system-tray companion (M4.3); no-op when unavailable.
+            self._build_system_tray(application)
 
             if not self.config.start_hidden:
                 window.present()
@@ -186,6 +205,72 @@ class MimOSAApplication:
         finally:
             self.shutdown()
         return int(status or 0)
+
+    # -- M4.3 companions ---------------------------------------------------
+
+    def _chat_controller_or_create(self):
+        """Return the shared chat controller, wiring it to the voice brain."""
+        if self._chat_controller is None:
+            from mimosa.ui.chat_logic import ChatController
+
+            router = None
+            conversation = None
+            try:
+                router = self.voice_loop.router
+                conversation = self.voice_loop.conversation
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Voice loop brain unavailable for chat; degrading.")
+            self._chat_controller = ChatController(
+                router=router, conversation=conversation
+            )
+        return self._chat_controller
+
+    def _open_chat(self) -> None:
+        """Open (or re-present) the optional text-chat window (M4.3)."""
+        from mimosa.ui.chat_window import open_chat_window
+
+        if self._chat_window is not None:
+            try:  # pragma: no cover - GTK-only path
+                self._chat_window.present()
+                return
+            except Exception:
+                self._chat_window = None
+        self._chat_window = open_chat_window(
+            self._chat_controller_or_create(), transient_for=self.window
+        )
+
+    def _build_system_tray(self, application=None) -> None:
+        """Create the system-tray companion if a back-end is available (M4.3)."""
+        from mimosa.ui.tray import create_system_tray
+        from mimosa.ui.tray_logic import TrayController, TrayCallbacks
+
+        def _toggle_avatar() -> None:
+            if self.window is None:
+                return
+            try:  # pragma: no cover - GTK-only path
+                if self.window.get_visible():
+                    self.window.set_visible(False)
+                else:
+                    self.window.present()
+            except Exception:
+                logger.debug("Avatar visibility toggle failed.")
+
+        def _quit() -> None:
+            self.shutdown()
+            if application is not None:
+                try:  # pragma: no cover - GTK-only path
+                    application.quit()
+                except Exception:
+                    pass
+
+        callbacks = TrayCallbacks(
+            on_show_avatar=_toggle_avatar,
+            on_hide_avatar=_toggle_avatar,
+            on_open_chat=self._open_chat,
+            on_open_settings=self._on_settings,
+            on_quit=_quit,
+        )
+        self._tray = create_system_tray(TrayController(callbacks))
 
     def _on_settings(self) -> None:
         """Open the multi-page Settings dialog (M3.3), modal to the avatar.
