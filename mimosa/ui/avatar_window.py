@@ -77,12 +77,7 @@ if HAS_GTK:
             self.on_settings = on_settings
             self.on_move = on_move
 
-            self.renderer = renderer or AvatarRenderer(
-                theme=self.config.theme,
-                animation_style=self.config.animation_style,
-                animation_speed=self.config.animation_speed,
-                animations_enabled=self.config.animations_enabled,
-            )
+            self.renderer = renderer or AvatarRenderer.from_config(self.config)
 
             self._anim_source = None
             self._last_frame_ns = None
@@ -220,6 +215,11 @@ if HAS_GTK:
         def set_audio_level(self, level: float) -> None:
             """Forward an audio level to the renderer for reactive speaking."""
             self.renderer.set_audio_level(level)
+
+        def set_viseme_timeline(self, timeline) -> None:
+            """Drive lip-sync from a viseme timeline (safe to call any time)."""
+            self.renderer.set_viseme_timeline(timeline)
+            self.area.queue_draw()
 
         # -- event handlers -------------------------------------------------
 

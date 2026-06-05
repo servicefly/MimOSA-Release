@@ -1,4 +1,4 @@
-# UI Architecture — GTK4 Desktop Avatar (M3.1)
+# UI Architecture — GTK4 Desktop Avatar (M3.1 + M3.2 lip-sync)
 
 This document describes MimOSA's desktop presence: a small, circular,
 always-on-top **avatar window** whose animation mirrors the assistant's voice
@@ -175,8 +175,38 @@ xvfb-run -a python -m pytest tests/test_avatar_window.py
 
 ---
 
-## 9. What's next (Phase 3)
+## 9. Lip-sync (M3.2)
 
-* Settings dialog (wire the right-click **Settings** action to a live editor).
-* Sprite/expression layers and mouth-sync on top of the procedural renderer.
+M3.2 adds an animated mouth that syncs to spoken audio. Phonemes are extracted
+from the **local** Piper/eSpeak engine (or, failing that, from the audio's own
+energy envelope), mapped to a small set of visemes, placed on a timeline, and
+played back against a monotonic clock that drives a Cairo mouth during the
+`SPEAKING` state. It is fully on-device and degrades to the M3.1 speaking bar
+whenever phonemes, Cairo, or a display are unavailable — a lip-sync fault can
+never crash the voice loop.
+
+```
+ PiperTTS.synthesize_with_visemes() ─► (wav_bytes, VisemeTimeline)   [worker thread]
+                                              │
+                       AvatarWindow.set_viseme_timeline(timeline)     [GTK thread]
+                                              ▼
+              AvatarRenderer ── AudioVisemeSync(clock) ── MouthAnimator ─► Cairo mouth
+```
+
+Added modules: `viseme_mapper.py` (pure), `phoneme_extractor.py` (voice,
+owns the timeline types), `audio_sync.py`, `mouth_animator.py`; `tts.py` gains
+`synthesize_with_visemes()` and `avatar_renderer.py` drives the mouth.
+See **[VISEME_SYSTEM.md](VISEME_SYSTEM.md)** for the full design, mapping table,
+timing model, fallback chain, and config fields (`lipsync_enabled`,
+`viseme_speed`, `mouth_style`, `lipsync_latency`, `lipsync_debug`).
+
+---
+
+## 10. What's next (Phase 3)
+
+* Wire `synthesize_with_visemes()` through the state bridge so live replies
+  drive the mouth end-to-end (renderer API is ready).
+* Settings dialog (wire the right-click **Settings** action to a live editor),
+  including the lip-sync controls.
+* Sprite/expression layers on top of the procedural renderer.
 * System-tray companion and an optional chat window.
