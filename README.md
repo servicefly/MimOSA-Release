@@ -26,9 +26,17 @@ llama.cpp) with no code changes.
 > amplitude-envelope fallback), and **M3.3 — Settings & Preferences UI**
 > completes the phase with a GTK4 multi-page settings dialog (Voice, Skills,
 > System Integration, Privacy & Data, Appearance, About) backed by a unified,
-> versioned, thread-safe config manager. **Phase 3 is complete.** Everything
-> degrades gracefully to a full headless fallback, every setting is stored
-> locally with **no telemetry**, and all **721 automated tests** pass offline.
+> versioned, thread-safe config manager. **Phase 3 is complete.** **Phase 4
+> (Extensibility & Companion UI) is complete:** **M4.1 — User-Defined Custom
+> Skills** lets you teach MimOSA new commands with no code (declarative triggers
+> + text/LLM responses, matched ahead of the generic fallback), **M4.2 —
+> First-Run Setup Wizard & Check-for-Updates** gives newcomers a guided setup and
+> an opt-in update check on the About page, and **M4.3 — Companion UI** adds an
+> optional **system-tray** icon, a **text-chat window** that shares the voice
+> loop's brain, and a **sprite/expression-layer** model atop the procedural
+> avatar. Everything degrades gracefully to a full headless fallback, every
+> setting is stored locally with **no telemetry**, and all **849 automated tests**
+> pass offline (more GTK-gated widget tests run on a desktop session).
 
 ---
 
@@ -497,6 +505,62 @@ screenshots) and [`docs/UI_ARCHITECTURE.md`](docs/UI_ARCHITECTURE.md) for the
 design.
 
 ![Settings — Voice page](docs/images/settings_voice.png)
+
+---
+
+## 🧩 Custom skills (M4.1 — extensibility)
+
+Teach MimOSA new commands **without writing any Python**. A custom skill is a
+small declarative spec — trigger phrases, a match mode (`any` / `all` / `exact`
+/ `regex`), and a response (`text` or a templated `llm` prompt) — stored locally
+and matched **ahead of** the generic question/LLM fallback.
+
+```python
+from mimosa.utils.config import AppConfigManager
+
+mgr = AppConfigManager(); cfg = mgr.load().get()
+cfg.skills.add_custom_skill({
+    "name": "Standup link",
+    "triggers": ["open standup", "daily standup"],
+    "response_type": "text",
+    "response": "Here's your standup doc: https://example.internal/standup",
+})
+mgr.save()
+```
+
+Custom skills are **data, not code** — there is no `eval`/`exec`/shell-out — and
+they never leave your machine. See [`docs/CUSTOM_SKILLS.md`](docs/CUSTOM_SKILLS.md).
+
+---
+
+## 🧭 First-run wizard & updates (M4.2)
+
+On first launch MimOSA runs a short **setup wizard** (wake word & voice →
+privacy posture → system integration), persists your choices, and marks the
+install configured so it never reappears. The wizard makes **fully-offline**
+(`provider = none`) a one-click choice.
+
+The **About** page gains a **Check for updates** action that compares your
+version against the latest published release using robust SemVer comparison. The
+check is opt-in, contacts only the public releases endpoint, sends no identifying
+data, and **never** interrupts you on a network error.
+
+---
+
+## 🛎️ Companion UI — tray, chat & expressions (M4.3)
+
+Three optional companions round out MimOSA's desktop presence (each degrades to
+nothing on a headless machine):
+
+- **System tray** — a panel status icon + menu (show/hide avatar, open chat,
+  mute, settings, quit) that reflects the assistant's live state.
+- **Chat window** — type to MimOSA using the **same brain** as the voice loop, so
+  typed and spoken turns share one conversation history.
+- **Expression layers** — an `Expression` model + composable sprite/layer stack
+  atop the procedural avatar, with a deterministic blink animation. Sprite-sheets
+  are described by **metadata only** (no images loaded in core logic).
+
+See [`docs/COMPANION_UI.md`](docs/COMPANION_UI.md) for the architecture.
 
 ---
 
