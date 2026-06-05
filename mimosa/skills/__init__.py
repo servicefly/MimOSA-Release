@@ -25,11 +25,13 @@ Future modules: ``file_ops.py``, ``app_launcher.py``, ``research.py``,
 ``system_control.py``, and ``code_gen.py``.
 """
 
+from mimosa.skills.application import ApplicationSkill
 from mimosa.skills.base_skill import BaseSkill, SkillResult
 from mimosa.skills.calculator_skill import CalculatorSkill
 from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
+from mimosa.skills.system_control import SystemControlSkill
 from mimosa.skills.time_skill import TimeSkill
 from mimosa.skills.weather_skill import WeatherSkill
 
@@ -42,4 +44,6 @@ __all__ = [
     "QuestionSkill",
     "GreetingSkill",
     "FileOperationsSkill",
+    "ApplicationSkill",
+    "SystemControlSkill",
 ]
