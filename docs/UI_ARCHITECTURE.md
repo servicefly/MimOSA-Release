@@ -202,11 +202,87 @@ timing model, fallback chain, and config fields (`lipsync_enabled`,
 
 ---
 
-## 10. What's next (Phase 3)
+## 10. Settings & preferences (M3.3)
 
-* Wire `synthesize_with_visemes()` through the state bridge so live replies
-  drive the mouth end-to-end (renderer API is ready).
-* Settings dialog (wire the right-click **Settings** action to a live editor),
-  including the lip-sync controls.
+M3.3 adds a **multi-page settings dialog** and the **unified configuration
+manager** that backs every preference in MimOSA. The same headless-vs-GTK split
+used everywhere else applies: all logic is in a pure controller; the GTK window
+is a thin view defined only when GTK 4 is importable.
+
+### Layering
+
+```
+ mimosa/utils/config.py        ── AppConfig (voice/skills/system/privacy + ui)   [pure]
+        │                          AppConfigManager (thread-safe, versioned)
+        ▼
+ mimosa/ui/settings_logic.py   ── SettingsController (working copy, page specs,  [pure]
+        │                          validate, dirty/restart detection, skills,
+        │                          clear-history hook, apply/cancel/commit)
+        ▼
+ mimosa/ui/settings_dialog.py  ── SettingsDialog (GtkStack + StackSidebar,        [GTK]
+                                   generated field widgets, skills ListBox,
+                                   Apply/Cancel/OK) ── None on headless machines
+```
+
+### Unified config (`mimosa/utils/config.py`)
+
+* **`AppConfig`** is the whole tree: section dataclasses `VoiceSettings`,
+  `SkillsSettings`, `SystemIntegrationSettings`, `PrivacySettings`, plus the
+  existing **`UIConfig`** embedded as the `ui` section (no duplication).
+* Each section has safe defaults and a `validate()` that **clamps** numbers and
+  rejects unknown enum values back to defaults — a hand-edited file never bricks
+  the app.
+* **Versioned & migratable.** A `version` field + `_migrate()` upgrade older
+  payloads (e.g. a pre-versioned flat `UIConfig` dump is nested under `ui`).
+* **`AppConfigManager`** guards all reads/writes with a `threading.RLock`
+  (safe to share between the GTK main loop and voice worker threads), does
+  **atomic** saves (temp file + `os.replace`), supports **observers**, and
+  **mirrors** the `ui` section back to the legacy `ui.json` so the avatar window
+  (which loads `UIConfig` directly) stays in sync. Path resolves via
+  `MIMOSA_CONFIG` → `$XDG_CONFIG_HOME` → `~/.config/mimosa/settings.json`.
+
+### Controller (`mimosa/ui/settings_logic.py`)
+
+* Holds a **working copy** (`AppConfig.from_dict(committed.to_dict())`) so edits
+  accumulate until **`apply()`** commits + persists, or **`cancel()`** discards.
+* `build_page_specs()` declares the six pages and their `FieldSpec`s (kind,
+  bounds, choices, `restart` flag, help text); the dialog renders straight from
+  these, so adding a setting is a one-line change.
+* `changed_fields()` / `restart_required()` detect which edits need an app
+  restart (wake word, STT model, audio devices, LLM provider).
+* Skill management: `skill_rows()` (priority-ordered), `set_skill_enabled()`,
+  `move_skill()`, with an **injectable `skills_provider`** so the real
+  `IntentRouter` skills appear in the GUI but tests can run on defaults.
+* `clear_history()` calls an injected hook (wired to `ConversationManager.clear`
+  in the app) and reports how many turns were dropped.
+
+### Dialog (`mimosa/ui/settings_dialog.py`)
+
+* `GtkStack` + `GtkStackSidebar`; Voice/System/Privacy/Appearance pages are
+  **generated** from the field specs (Switch / DropDown / SpinButton / Entry),
+  the Skills page is a `GtkListBox` with per-row enable switch + up/down
+  priority buttons, and About shows version + system summary.
+* Modal & transient-for the avatar window; **Apply** persists, **OK** persists
+  and closes, **Cancel** reverts. A restart-required banner and the live privacy
+  summary update as fields change.
+* `open_settings_dialog(manager, …)` builds the controller (wiring
+  `skills_provider` / `on_clear_history`) and presents the window; returns
+  `None` (logged) when GTK is unavailable so callers can invoke it
+  unconditionally.
+
+### Access points
+
+* **Right-click → Settings** on the avatar (existing `win.settings` action).
+* **Ctrl + ,** keyboard shortcut (added to `AvatarWindow._on_key`).
+* `MimOSAApplication._on_settings()` opens the dialog and, on apply, calls
+  `AvatarWindow.apply_config()` to **live-preview** UI changes (size, opacity,
+  theme, animation) without a restart.
+
+---
+
+## 11. What's next (Phase 4)
+
 * Sprite/expression layers on top of the procedural renderer.
 * System-tray companion and an optional chat window.
+* First-run setup wizard (the settings infrastructure is ready) and a
+  "check for updates" action on the About page.

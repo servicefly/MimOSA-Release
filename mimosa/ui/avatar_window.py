@@ -258,7 +258,36 @@ if HAS_GTK:
             if keyval == Gdk.KEY_Escape:
                 self.set_visible(False)
                 return True
+            # Ctrl+comma -> open Settings (the conventional preferences shortcut).
+            ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+            if ctrl and keyval in (Gdk.KEY_comma, Gdk.KEY_less):
+                self._action_settings()
+                return True
             return False
+
+        def apply_config(self, config) -> None:
+            """Apply (possibly changed) UI preferences to the live window.
+
+            Called after the Settings dialog applies changes so size/opacity/
+            theme/animation update without a restart. Best-effort and safe to
+            call from the GTK main thread.
+            """
+            self.config = config or self.config
+            try:
+                self.set_opacity(float(self.config.opacity))
+            except Exception:  # pragma: no cover - backend dependent
+                pass
+            try:
+                self.set_default_size(self.config.size, self.config.size)
+                self.set_size_request(self.config.size, self.config.size)
+            except Exception:  # pragma: no cover
+                pass
+            # Rebuild the renderer from the new config (theme/animation/lip-sync).
+            try:
+                self.renderer = AvatarRenderer.from_config(self.config)
+                self.area.queue_draw()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Renderer rebuild on config apply failed", exc_info=True)
 
         def _action_settings(self, *args) -> None:
             if self.on_settings is not None:

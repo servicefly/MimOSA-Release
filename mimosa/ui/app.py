@@ -49,13 +49,23 @@ class MimOSAApplication:
         voice_loop=None,
         config: Optional[UIConfig] = None,
         force_headless: bool = False,
+        config_manager=None,
     ) -> None:
         self._voice_loop = voice_loop
-        self.config = config or UIConfig.load()
+        # Unified config manager (M3.3) is the source of truth for all settings.
+        # The avatar UI still works directly with the ``ui`` section as a
+        # :class:`UIConfig`, kept in sync via the manager.
+        from mimosa.utils.config import AppConfigManager
+
+        self.config_manager = config_manager or AppConfigManager()
+        if config_manager is None:
+            self.config_manager.load()
+        self.config = config or self.config_manager.get().ui
         self.force_headless = force_headless
         self.bridge: Optional[StateBridge] = None
         self.window = None
         self._gtk_app = None
+        self._settings_dialog = None
         self._voice_thread: Optional[threading.Thread] = None
 
     # -- voice loop --------------------------------------------------------
@@ -153,8 +163,72 @@ class MimOSAApplication:
         return int(status or 0)
 
     def _on_settings(self) -> None:
-        """Placeholder settings hook (full settings dialog is a later milestone)."""
-        logger.info("Settings requested (config at default path).")
+        """Open the multi-page Settings dialog (M3.3), modal to the avatar.
+
+        All hooks (skill listing, clear-history) are wired to the live voice
+        loop when available, but are fully optional so the dialog also opens in
+        minimal/test contexts. Applying changes persists them via the config
+        manager and re-applies UI preferences to the running avatar.
+        """
+        try:
+            from mimosa.ui.settings_dialog import open_settings_dialog
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Could not import settings dialog")
+            return
+
+        # If a dialog is already open, just focus it.
+        if self._settings_dialog is not None:
+            try:
+                self._settings_dialog.present()
+                return
+            except Exception:
+                self._settings_dialog = None
+
+        def _skills_provider():
+            try:
+                return list(self.voice_loop.router.skills)
+            except Exception:  # pragma: no cover - router optional
+                return []
+
+        def _on_clear_history():
+            try:
+                conv = self.voice_loop.conversation
+                count = conv.turn_count
+                conv.clear()
+                return count
+            except Exception:  # pragma: no cover - conversation optional
+                return 0
+
+        def _system_summary():
+            try:
+                from mimosa.system.system_profiler import SystemProfiler
+
+                return SystemProfiler().profile.summary()
+            except Exception:  # pragma: no cover
+                return None
+
+        def _on_close(applied: bool) -> None:
+            self._settings_dialog = None
+            if applied:
+                self._apply_ui_preferences()
+
+        self._settings_dialog = open_settings_dialog(
+            self.config_manager,
+            transient_for=self.window,
+            skills_provider=_skills_provider,
+            on_clear_history=_on_clear_history,
+            on_close=_on_close,
+            system_summary=_system_summary(),
+        )
+
+    def _apply_ui_preferences(self) -> None:
+        """Re-apply the (possibly changed) UI section to the running avatar."""
+        try:
+            self.config = self.config_manager.get().ui
+            if self.window is not None and hasattr(self.window, "apply_config"):
+                self.window.apply_config(self.config)
+        except Exception:  # pragma: no cover - best-effort live preview
+            logger.debug("Could not live-apply UI preferences", exc_info=True)
 
     # -- dispatch ----------------------------------------------------------
 
