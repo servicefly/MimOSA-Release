@@ -12,11 +12,13 @@ llama.cpp) with no code changes.
 
 > **Status:** **Phase 1 (Foundations) complete** — project scaffold + LLM
 > abstraction (M1.1), local-first voice pipeline (M1.2), and the three-tier
-> intent router with built-in skills (M1.3). **Phase 2** is underway:
-> **M2.1 — File Operations** (search/open/create/move/delete with a full safety
-> sandbox) and **M2.2 — Application Launching & System Control** (launch/close
-> apps via the `.desktop` catalog, plus volume/brightness/Wi-Fi/battery) are
-> complete. All **280 automated tests** pass offline.
+> intent router with built-in skills (M1.3). **Phase 2 (System Integration) is
+> complete:** **M2.1 — File Operations** (search/open/create/move/delete with a
+> full safety sandbox), **M2.2 — Application Launching & System Control**
+> (launch/close apps via the `.desktop` catalog, plus volume/brightness/Wi-Fi/
+> battery), and **M2.3 — Kubuntu 26.04 Integration** (OS/hardware profiling, KDE
+> Plasma D-Bus integration, hardware-aware optimization, and a voice
+> `SystemInfoSkill`). All **397 automated tests** pass offline.
 
 ---
 
@@ -41,8 +43,8 @@ osa_project/
 │   ├── llm/                # LLM abstraction (Abacus + future local models)
 │   ├── voice/              # Wake word, STT (Whisper), TTS (Piper)
 │   ├── memory/             # Session, long-term, semantic & private memory
-│   ├── skills/             # File ops, app launching, research, system control
-│   ├── system/             # Distro detection, resource monitoring, app registry
+│   ├── skills/             # File ops, app launching, system control & info
+│   ├── system/             # OS/hardware profiling, KDE integration, app registry
 │   ├── ui/                 # GTK4 interface & 2D avatar (Phase 3)
 │   └── utils/              # Logging & configuration helpers
 ├── data/                   # Local storage, models, indices (git-ignored)
@@ -212,6 +214,7 @@ is **hybrid**:
 | `file_ops` / `file` | `FileOperationsSkill` | ❌ local | **(M2.1)** Search, open, create, move, delete files/folders — sandboxed to your home dir |
 | `application` / `app_launch` | `ApplicationSkill` | ❌ local | **(M2.2)** Launch / list / query / close desktop apps via the `.desktop` catalog |
 | `system_control` / `system` | `SystemControlSkill` | ❌ local | **(M2.2)** Volume, screen brightness, Wi-Fi, and battery — with graceful degradation |
+| `system_info` | `SystemInfoSkill` | ❌ local | **(M2.3)** Answer questions about your OS, desktop, display server, KDE Plasma version, and CPU/RAM/GPU/audio |
 
 > **Privacy:** local skills never touch the network. LLM-backed skills send
 > only the **transcribed text** — never audio. Every skill degrades gracefully:
@@ -331,6 +334,55 @@ The logic lives in
 [`mimosa/skills/system_control.py`](mimosa/skills/system_control.py). See
 [`docs/APPLICATION_CONTROL.md`](docs/APPLICATION_CONTROL.md) for the full design
 and the optional system dependencies.
+
+---
+
+## 🐧 Kubuntu 26.04 integration (M2.3 — system integration)
+
+MimOSA is now **aware of the machine it runs on** and adapts to it — entirely
+locally. Nothing about your hardware or OS is ever sent to the cloud.
+
+### Ask about your system
+
+| You say | MimOSA tells you |
+|---------|------------------|
+| "What desktop am I using?" / "Is this Wayland or X11?" | Desktop environment & display server |
+| "What version of Plasma?" | KDE Plasma version |
+| "What operating system is this?" | Distro & whether it's Kubuntu |
+| "Show me my system specs" | Combined OS + hardware summary |
+| "What audio backend am I using?" / "Do I have a microphone?" | Audio stack & capture devices |
+| "How much RAM / what CPU / what graphics card do I have?" | The relevant hardware fact |
+| "What settings do you recommend for this machine?" | Hardware-aware tuning |
+
+### Under the hood
+
+* **System profiling** — distro, version, desktop environment, **Wayland/X11**,
+  KDE Plasma version, architecture & kernel (from `/etc/os-release`, XDG
+  variables, and `platform`).
+* **Hardware detection** — audio backend (**PipeWire → PulseAudio → ALSA**),
+  displays & multi-monitor, microphones, CPU, RAM, and GPU (via `psutil`,
+  `/proc`, `/sys`, `lspci`, `xrandr`, `pactl`).
+* **KDE integration** — desktop **notifications**, **virtual desktops**, and
+  **KDE Connect** over D-Bus (`dbus-python` or `qdbus`), with a non-KDE-safe
+  fallback that simply no-ops.
+* **System optimization** — picks the audio backend, **Whisper model size**,
+  TTS quality, wake-word sensitivity, and conversation-history limit from the
+  machine's performance tier.
+
+**Graceful degradation everywhere:** on a non-Kubuntu host, a GNOME session, or
+a box without D-Bus/`lspci`/`xrandr`, every detector returns a partial-but-honest
+result rather than crashing — which is exactly why the whole feature is testable
+off-target. `python scripts/health_check.py` prints a full profile plus a
+**Kubuntu 26.04 / KDE compatibility** report.
+
+The logic lives in
+[`mimosa/system/system_profiler.py`](mimosa/system/system_profiler.py),
+[`mimosa/system/hardware_detector.py`](mimosa/system/hardware_detector.py),
+[`mimosa/system/kde_integration.py`](mimosa/system/kde_integration.py),
+[`mimosa/system/system_optimizer.py`](mimosa/system/system_optimizer.py), and
+[`mimosa/skills/system_info.py`](mimosa/skills/system_info.py). See
+[`docs/KUBUNTU_INTEGRATION.md`](docs/KUBUNTU_INTEGRATION.md) for the full design,
+hardware requirements, and optional dependencies.
 
 ---
 
