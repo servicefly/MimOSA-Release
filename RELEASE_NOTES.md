@@ -1,0 +1,72 @@
+# MimOSA Release Notes
+
+## v1.0.0-rc.1 — Release Candidate 1
+
+**The first production-ready release candidate of MimOSA**, a privacy-first,
+local-first, voice-controlled AI assistant for Linux. All eight development
+phases are complete and the full automated suite (**1,377 tests**) passes
+offline.
+
+### Highlights
+
+- 🎙️ **On-device voice pipeline** — wake word → Whisper STT → skills → Piper TTS,
+  all local. Optional cloud LLM via Abacus.AI; fully local mode available.
+- 🧠 **Memory & learning** — encrypted conversation store, preference learning,
+  proactive context.
+- 🔎 **Web research** — opt-in, privacy-aware multi-source research & summaries.
+- ⚙️ **Background tasks** — task queue + resource monitor + on-device error-fix
+  learning, all behind settings toggles.
+- 🪟 **Companion UI** — optional GTK4 desktop avatar with lip-sync, system tray,
+  and text-chat window; graceful headless fallback.
+
+### New in Phase 8 (Polish & Testing)
+
+- **Graceful error UX** — every error becomes a calm, spoken-friendly message;
+  a traceback never reaches the user (it goes only to the log). Known fixes are
+  suggested automatically when the on-device learner has seen the error before.
+- **Logging** — a single rotating log file at
+  `~/.local/share/mimosa/logs/mimosa.log` (1 MiB × 3 backups), privacy-safe, with
+  `mimosa --check` to print its location and `--no-log-file` to opt out.
+- **"Get to Know MimOSA"** — a first-run personalization step (your name, what to
+  call the assistant, pronouns, chattiness, greet-by-name), editable later under
+  **Settings → Personalization**.
+- **Accessibility** — keyboard navigation, screen-reader labels, and inline help
+  on every settings/wizard field; high-contrast-friendly.
+- **New settings pages** — Personalization, Background Tasks, Web Research.
+- **Automatic data maintenance** — retention-based purge + `VACUUM` on startup.
+- **One-command install/uninstall** — `pyproject.toml` package (`mimosa`
+  command), `install.sh` (with `--with-voice` / `--with-ui` / `--with-all`), and
+  `uninstall.sh` (`--purge` to remove data too).
+- **End-to-end tests** — hermetic, assembled-app integration coverage.
+
+### Install
+
+```bash
+git clone https://github.com/servicefly/MimOSA.git
+cd MimOSA
+./install.sh            # + --with-voice / --with-ui / --with-all
+source .venv/bin/activate
+mimosa --check
+mimosa
+```
+
+See **[INSTALL.md](INSTALL.md)** for the full guide and
+**[ISSUES_TO_ADDRESS.md](ISSUES_TO_ADDRESS.md)** for optional prerequisites
+(PortAudio, GTK4, API keys, first-run model downloads).
+
+### Before promoting to a final 1.0.0
+
+This is a **release candidate**. Recommended validation on a real desktop:
+
+1. Run the GTK-gated UI tests in a graphical session (the 10 currently skipped).
+2. Exercise the voice path with a real microphone + PortAudio.
+3. Confirm the avatar/companion UI on a GTK4 desktop.
+4. Smoke-test a clean `./install.sh` → `mimosa` → `./uninstall.sh --purge` cycle.
+
+`main` is intentionally left untouched; promotion is a human decision after RC
+validation.
+
+### Privacy
+
+No telemetry. All conversation data, preferences, tasks, and logs stay on your
+machine. Cloud access is optional and limited to the LLM if you enable it.
