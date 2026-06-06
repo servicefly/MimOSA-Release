@@ -26,6 +26,7 @@ CONVERSATIONS_DB = "conversations.db"
 PREFERENCES_DB = "preferences.db"
 PRIVATE_DB = "private.db"
 SEMANTIC_DIR = "semantic"
+TASKS_DB = "tasks.db"
 
 
 def default_data_dir() -> Path:
@@ -61,6 +62,11 @@ def private_db_path() -> Path:
 def semantic_store_dir() -> Path:
     """Directory for the semantic (vector) memory store (M5.3)."""
     return default_data_dir() / SEMANTIC_DIR
+
+
+def tasks_db_path() -> Path:
+    """Absolute path to the background-task-queue SQLite database (M7.1)."""
+    return default_data_dir() / TASKS_DB
 
 
 def ensure_data_dir() -> Path:
