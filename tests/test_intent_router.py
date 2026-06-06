@@ -440,3 +440,57 @@ class TestResearchIntent:
         result = router.route("research electric cars")
         assert result.skill == "research"
         assert "web search" in result.text.lower()
+
+
+
+class TestTaskIntent:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "what are you working on?",
+            "what tasks are running?",
+            "show me the task queue",
+            "pause the task",
+            "pause everything",
+            "resume the indexing task",
+            "carry on with the download",
+            "cancel the background job",
+            "stop the indexing task",
+            "what's in the queue?",
+        ],
+    )
+    def test_task_queries_classified_as_task(self, text):
+        from mimosa.core.intent_router import INTENT_TASK
+
+        router = IntentRouter()
+        assert router.classify(text).intent == INTENT_TASK
+
+    @pytest.mark.parametrize(
+        "text,intent",
+        [
+            ("what time is it?", INTENT_TIME),
+            ("what is 2 + 2?", INTENT_CALCULATOR),
+            ("what is the capital of France?", INTENT_QUESTION),
+            ("what's the weather in Paris?", INTENT_WEATHER),
+            ("hello there", INTENT_GREETING),
+        ],
+    )
+    def test_non_task_queries_unaffected(self, text, intent):
+        router = IntentRouter()
+        assert router.classify(text).intent == intent
+
+    def test_task_patterns_do_not_hijack_system_control(self):
+        # "stop the music" is a media/system command, not a task-queue command.
+        router = IntentRouter()
+        assert router.classify("stop the music").intent != "task_control"
+
+    def test_task_skill_registered_by_default(self):
+        from mimosa.core.intent_router import INTENT_TASK
+
+        router = IntentRouter()
+        assert INTENT_TASK in router._by_intent
+
+    def test_route_to_task_skill(self):
+        router = IntentRouter()
+        result = router.route("what are you working on?")
+        assert result.skill == "tasks"

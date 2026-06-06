@@ -23,6 +23,7 @@ from mimosa.utils.config import (
     PrivacySettings,
     ResearchSettings,
     SkillsSettings,
+    TasksSettings,
     SystemIntegrationSettings,
     VoiceSettings,
     default_config_path,
@@ -310,3 +311,66 @@ def test_appconfig_old_payload_without_research_gets_defaults():
 
 def test_research_in_default_skill_order():
     assert "research" in DEFAULT_SKILL_ORDER
+
+
+# --------------------------------------------------------------------------
+# TasksSettings (M7)
+# --------------------------------------------------------------------------
+
+def test_tasks_settings_defaults():
+    t = TasksSettings()
+    assert t.background_tasks_enabled is True
+    assert t.max_concurrent == 2
+    assert t.resource_monitoring is True
+    assert t.cpu_threshold == 85.0
+    assert t.mem_threshold == 85.0
+    assert t.learn_error_fixes is True
+
+
+def test_tasks_settings_clamps_and_coerces():
+    t = TasksSettings(
+        background_tasks_enabled=1,
+        max_concurrent=999,
+        cpu_threshold=1.0,
+        mem_threshold=999.0,
+    ).validate()
+    assert t.background_tasks_enabled is True
+    assert t.max_concurrent == 8  # clamped to max
+    assert t.cpu_threshold == 10.0  # clamped to min
+    assert t.mem_threshold == 100.0  # clamped to max
+
+
+def test_tasks_settings_min_concurrent():
+    t = TasksSettings(max_concurrent=0).validate()
+    assert t.max_concurrent == 1  # clamped to min
+
+
+def test_appconfig_includes_tasks_section():
+    cfg = AppConfig().validate()
+    assert isinstance(cfg.tasks, TasksSettings)
+    d = cfg.to_dict()
+    assert "tasks" in d
+    assert d["tasks"]["background_tasks_enabled"] is True
+
+
+def test_appconfig_tasks_roundtrip():
+    cfg = AppConfig()
+    cfg.tasks.max_concurrent = 4
+    cfg.tasks.learn_error_fixes = False
+    cfg.validate()
+    data = cfg.to_dict()
+    restored = AppConfig.from_dict(data)
+    assert restored.tasks.max_concurrent == 4
+    assert restored.tasks.learn_error_fixes is False
+    assert restored.to_dict() == data
+
+
+def test_appconfig_old_payload_without_tasks_gets_defaults():
+    # An on-disk config from before M7 (no tasks key) still loads cleanly.
+    cfg = AppConfig.from_dict({"version": 1, "voice": {"tts_speed": 1.1}})
+    assert cfg.tasks.background_tasks_enabled is True
+    assert cfg.tasks.max_concurrent == 2
+
+
+def test_tasks_in_default_skill_order():
+    assert "tasks" in DEFAULT_SKILL_ORDER
