@@ -21,6 +21,7 @@ from mimosa.utils.config import (
     DEFAULT_LLM_PROVIDER,
     DEFAULT_SKILL_ORDER,
     PrivacySettings,
+    ResearchSettings,
     SkillsSettings,
     SystemIntegrationSettings,
     VoiceSettings,
@@ -246,3 +247,66 @@ def test_privacy_memory_flags_roundtrip():
     restored = AppConfig.from_dict(cfg.to_dict())
     assert restored.privacy.persist_conversations is False
     assert restored.privacy.auto_private_mode is False
+
+
+
+# -- research settings (M6) --------------------------------------------------
+
+def test_research_settings_defaults_privacy_first():
+    r = ResearchSettings()
+    # web search OFF by default -> no surprise network on fresh install.
+    assert r.web_search_enabled is False
+    assert r.max_sources == 6
+    assert r.token_budget == 3000
+    assert r.learn_cost_patterns is True
+
+
+def test_research_settings_clamps_and_coerces():
+    r = ResearchSettings(
+        web_search_enabled=1,
+        backend="bogus",
+        max_sources=999,
+        per_category_cap=0,
+        token_budget=1,
+    ).validate()
+    assert r.web_search_enabled is True
+    assert r.backend == "duckduckgo"  # unknown backend -> default
+    assert r.max_sources == 25  # clamped to max
+    assert r.per_category_cap == 1  # clamped to min
+    assert r.token_budget == 256  # clamped to min
+
+
+def test_research_settings_backend_none_allowed():
+    r = ResearchSettings(backend="none").validate()
+    assert r.backend == "none"
+
+
+def test_appconfig_includes_research_section():
+    cfg = AppConfig().validate()
+    assert isinstance(cfg.research, ResearchSettings)
+    d = cfg.to_dict()
+    assert "research" in d
+    assert d["research"]["web_search_enabled"] is False
+
+
+def test_appconfig_research_roundtrip():
+    cfg = AppConfig()
+    cfg.research.web_search_enabled = True
+    cfg.research.max_sources = 8
+    cfg.validate()
+    data = cfg.to_dict()
+    restored = AppConfig.from_dict(data)
+    assert restored.research.web_search_enabled is True
+    assert restored.research.max_sources == 8
+    assert restored.to_dict() == data
+
+
+def test_appconfig_old_payload_without_research_gets_defaults():
+    # An on-disk config from before M6 (no research key) still loads cleanly.
+    cfg = AppConfig.from_dict({"version": 1, "voice": {"tts_speed": 1.1}})
+    assert cfg.research.web_search_enabled is False
+    assert cfg.research.backend == "duckduckgo"
+
+
+def test_research_in_default_skill_order():
+    assert "research" in DEFAULT_SKILL_ORDER

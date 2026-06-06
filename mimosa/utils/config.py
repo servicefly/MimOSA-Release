@@ -91,8 +91,22 @@ DEFAULT_SKILL_ORDER = (
     "system_control",
     "system_info",
     "greeting",
+    "research",
     "question",
 )
+
+# Research (M6) defaults and bounds.
+DEFAULT_RESEARCH_MAX_SOURCES = 6
+MIN_RESEARCH_MAX_SOURCES = 1
+MAX_RESEARCH_MAX_SOURCES = 25
+DEFAULT_RESEARCH_TOKEN_BUDGET = 3000
+MIN_RESEARCH_TOKEN_BUDGET = 256
+MAX_RESEARCH_TOKEN_BUDGET = 200000
+DEFAULT_RESEARCH_PER_CATEGORY_CAP = 3
+MIN_RESEARCH_PER_CATEGORY_CAP = 1
+MAX_RESEARCH_PER_CATEGORY_CAP = 25
+RESEARCH_BACKENDS = ("none", "duckduckgo")
+DEFAULT_RESEARCH_BACKEND = "duckduckgo"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -362,6 +376,67 @@ class PrivacySettings:
         return f"{llm}. Conversation: {hist}, {retain}. All settings stored locally; no telemetry."
 
 
+@dataclass
+class ResearchSettings:
+    """Web research / multi-source synthesis policy (M6).
+
+    Privacy-first defaults: web search is **disabled** out of the box so a
+    fresh install never makes a surprise network request. The user must opt in
+    (setup wizard or settings) before MimOSA will reach the internet to gather
+    sources. Everything else degrades gracefully offline.
+    """
+
+    #: Master opt-in. When False, the research skill answers locally with a
+    #: "web search is off" message and never touches the network.
+    web_search_enabled: bool = False
+    #: Search backend to use when ``web_search_enabled`` is True. ``"none"``
+    #: keeps the pipeline fully offline even when research is enabled.
+    backend: str = DEFAULT_RESEARCH_BACKEND
+    #: Maximum number of sources fed into synthesis per query.
+    max_sources: int = DEFAULT_RESEARCH_MAX_SOURCES
+    #: Per-category cap so one perspective cannot crowd out the rest.
+    per_category_cap: int = DEFAULT_RESEARCH_PER_CATEGORY_CAP
+    #: Token budget for the evidence + synthesis call (negotiated down to fit).
+    token_budget: int = DEFAULT_RESEARCH_TOKEN_BUDGET
+    #: Append a short "budget note" to spoken answers when sources were trimmed.
+    include_budget_note: bool = False
+    #: Learn cost/budget patterns per topic (builds on M5.2 preference
+    #: learning). When False, no research-cost observations are recorded.
+    learn_cost_patterns: bool = True
+
+    def validate(self) -> "ResearchSettings":
+        self.web_search_enabled = bool(self.web_search_enabled)
+        if self.backend not in RESEARCH_BACKENDS:
+            self.backend = DEFAULT_RESEARCH_BACKEND
+        self.include_budget_note = bool(self.include_budget_note)
+        self.learn_cost_patterns = bool(self.learn_cost_patterns)
+
+        try:
+            self.max_sources = int(
+                _clamp(int(self.max_sources),
+                       MIN_RESEARCH_MAX_SOURCES, MAX_RESEARCH_MAX_SOURCES)
+            )
+        except (TypeError, ValueError):
+            self.max_sources = DEFAULT_RESEARCH_MAX_SOURCES
+
+        try:
+            self.per_category_cap = int(
+                _clamp(int(self.per_category_cap),
+                       MIN_RESEARCH_PER_CATEGORY_CAP, MAX_RESEARCH_PER_CATEGORY_CAP)
+            )
+        except (TypeError, ValueError):
+            self.per_category_cap = DEFAULT_RESEARCH_PER_CATEGORY_CAP
+
+        try:
+            self.token_budget = int(
+                _clamp(int(self.token_budget),
+                       MIN_RESEARCH_TOKEN_BUDGET, MAX_RESEARCH_TOKEN_BUDGET)
+            )
+        except (TypeError, ValueError):
+            self.token_budget = DEFAULT_RESEARCH_TOKEN_BUDGET
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -381,6 +456,7 @@ class AppConfig:
     skills: SkillsSettings = field(default_factory=SkillsSettings)
     system: SystemIntegrationSettings = field(default_factory=SystemIntegrationSettings)
     privacy: PrivacySettings = field(default_factory=PrivacySettings)
+    research: ResearchSettings = field(default_factory=ResearchSettings)
     ui: UIConfig = field(default_factory=UIConfig)
 
     def validate(self) -> "AppConfig":
@@ -393,6 +469,7 @@ class AppConfig:
         self.skills.validate()
         self.system.validate()
         self.privacy.validate()
+        self.research.validate()
         self.ui.validate()
         return self
 
@@ -404,6 +481,7 @@ class AppConfig:
             "skills": asdict(self.skills),
             "system": asdict(self.system),
             "privacy": asdict(self.privacy),
+            "research": asdict(self.research),
             "ui": self.ui.to_dict(),
         }
 
@@ -427,6 +505,7 @@ class AppConfig:
             skills=_section(SkillsSettings, "skills"),
             system=_section(SystemIntegrationSettings, "system"),
             privacy=_section(PrivacySettings, "privacy"),
+            research=_section(ResearchSettings, "research"),
             ui=UIConfig.from_dict(data.get("ui") or {}),
         )
         return cfg.validate()

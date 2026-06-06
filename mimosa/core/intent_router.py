@@ -57,6 +57,7 @@ from mimosa.skills.custom_skill import CustomSkill
 from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
+from mimosa.skills.research_skill import ResearchSkill
 from mimosa.skills.system_control import SystemControlSkill
 from mimosa.skills.system_info import SystemInfoSkill
 from mimosa.skills.time_skill import TimeSkill
@@ -74,6 +75,7 @@ INTENT_FILE = "file_ops"
 INTENT_APPLICATION = "application"
 INTENT_SYSTEM = "system_control"
 INTENT_SYSTEM_INFO = "system_info"
+INTENT_RESEARCH = "research"
 INTENT_UNKNOWN = "unknown"
 
 SUPPORTED_INTENTS = (
@@ -84,6 +86,7 @@ SUPPORTED_INTENTS = (
     INTENT_APPLICATION,
     INTENT_SYSTEM,
     INTENT_SYSTEM_INFO,
+    INTENT_RESEARCH,
     INTENT_QUESTION,
     INTENT_GREETING,
 )
@@ -245,6 +248,32 @@ _SYSTEM_INFO_PATTERNS = [
 ]
 
 
+# Research patterns (M6). These catch explicit requests to research a topic
+# across multiple web sources and synthesize a balanced overview. They are
+# evaluated before the Tier-1b question-shape heuristic because research
+# requests are frequently phrased as questions ("what are people saying
+# about ...?") and would otherwise be swallowed by the question skill.
+_RESEARCH_PATTERNS = [
+    r"\bresearch\b",
+    r"\b(do|run|some)\b.*\bresearch\b",
+    r"\blook\s+into\b",
+    r"\binvestigate\b",
+    r"\bdig\s+into\b",
+    r"\bfind\s+out\s+(about|more\s+about)\b",
+    r"\bgather\b.*\b(sources|information|info|perspectives)\b",
+    r"\b(what|how)\b.*\bpeople\b.*\b(saying|think|say)\b",
+    r"\bwhat\s+are\s+people\s+saying\b",
+    r"\b(balanced|different|multiple|various|opposing|both\s+sides?)\b.*"
+    r"\b(view|views|perspective|perspectives|opinion|opinions|overview|debate)\b",
+    r"\b(perspectives?|viewpoints?)\s+(on|about)\b",
+    r"\b(give|get|provide)\s+me\b.*\b(overview|rundown|breakdown)\b.*\b(on|about|of)\b",
+    r"\bsummari[sz]e\b.*\b(debate|discussion|coverage|news|sources)\b",
+    r"\bweb\s+search\b",
+    r"\bsearch\s+the\s+web\b",
+    r"\bwhat'?s\s+the\s+(latest|news)\b.*\b(on|about)\b",
+]
+
+
 def _matches_any(text: str, patterns: List[str]) -> bool:
     return any(re.search(p, text) for p in patterns)
 
@@ -290,6 +319,7 @@ class IntentRouter:
                 SystemControlSkill(),
                 SystemInfoSkill(),
                 GreetingSkill(llm_provider=llm_provider),
+                ResearchSkill(llm_provider=llm_provider),
                 QuestionSkill(llm_provider=llm_provider),
             ]
         self._skills: List[BaseSkill] = []
@@ -389,6 +419,14 @@ class IntentRouter:
         custom = self._match_custom_skill(text)
         if custom is not None:
             return IntentClassification(custom.intents[0], 0.9, source="custom")
+
+        # Tier 1b': explicit research requests (M6). Checked before the generic
+        # question-shape heuristic because research is frequently phrased as a
+        # question ("what are people saying about ...?"); without this guard such
+        # utterances would be answered by the single-shot question skill instead
+        # of the multi-source research pipeline.
+        if _matches_any(lowered, _RESEARCH_PATTERNS):
+            return IntentClassification(INTENT_RESEARCH, 0.9, source="heuristic")
 
         # Tier 1b: clearly question-shaped utterances route straight to the
         # question skill. This is a deliberate cost optimization -- a question
