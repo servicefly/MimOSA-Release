@@ -92,8 +92,18 @@ DEFAULT_SKILL_ORDER = (
     "system_info",
     "greeting",
     "research",
+    "tasks",
     "question",
 )
+
+# Background tasks / advanced features (M7) defaults and bounds.
+DEFAULT_MAX_CONCURRENT_TASKS = 2
+MIN_MAX_CONCURRENT_TASKS = 1
+MAX_MAX_CONCURRENT_TASKS = 8
+DEFAULT_TASK_CPU_THRESHOLD = 85.0
+DEFAULT_TASK_MEM_THRESHOLD = 85.0
+MIN_RESOURCE_THRESHOLD = 10.0
+MAX_RESOURCE_THRESHOLD = 100.0
 
 # Research (M6) defaults and bounds.
 DEFAULT_RESEARCH_MAX_SOURCES = 6
@@ -377,6 +387,61 @@ class PrivacySettings:
 
 
 @dataclass
+class TasksSettings:
+    """Background task queue & advanced-features policy (M7).
+
+    Privacy-first / local-first like the rest of MimOSA: tasks run on-device,
+    nothing is reported anywhere, and resource monitoring is a local psutil
+    read. Everything degrades gracefully when disabled or when psutil is absent.
+    """
+
+    #: Master switch for the background task queue. When False, the task-control
+    #: skill simply reports there is nothing running and no workers start.
+    background_tasks_enabled: bool = True
+    #: Maximum tasks allowed to run concurrently (clamped to a sane range).
+    max_concurrent: int = DEFAULT_MAX_CONCURRENT_TASKS
+    #: Gate new task starts on system load via the psutil resource monitor.
+    resource_monitoring: bool = True
+    #: CPU percent at/above which the system is "busy" and new starts defer.
+    cpu_threshold: float = DEFAULT_TASK_CPU_THRESHOLD
+    #: Memory percent at/above which the system is "busy".
+    mem_threshold: float = DEFAULT_TASK_MEM_THRESHOLD
+    #: Learn which fixes resolve which errors (builds on M5.2 preference
+    #: learning). When False, no error-fix observations are recorded.
+    learn_error_fixes: bool = True
+
+    def validate(self) -> "TasksSettings":
+        self.background_tasks_enabled = bool(self.background_tasks_enabled)
+        self.resource_monitoring = bool(self.resource_monitoring)
+        self.learn_error_fixes = bool(self.learn_error_fixes)
+
+        try:
+            self.max_concurrent = int(
+                _clamp(int(self.max_concurrent),
+                       MIN_MAX_CONCURRENT_TASKS, MAX_MAX_CONCURRENT_TASKS)
+            )
+        except (TypeError, ValueError):
+            self.max_concurrent = DEFAULT_MAX_CONCURRENT_TASKS
+
+        try:
+            self.cpu_threshold = float(
+                _clamp(float(self.cpu_threshold),
+                       MIN_RESOURCE_THRESHOLD, MAX_RESOURCE_THRESHOLD)
+            )
+        except (TypeError, ValueError):
+            self.cpu_threshold = DEFAULT_TASK_CPU_THRESHOLD
+
+        try:
+            self.mem_threshold = float(
+                _clamp(float(self.mem_threshold),
+                       MIN_RESOURCE_THRESHOLD, MAX_RESOURCE_THRESHOLD)
+            )
+        except (TypeError, ValueError):
+            self.mem_threshold = DEFAULT_TASK_MEM_THRESHOLD
+        return self
+
+
+@dataclass
 class ResearchSettings:
     """Web research / multi-source synthesis policy (M6).
 
@@ -457,6 +522,7 @@ class AppConfig:
     system: SystemIntegrationSettings = field(default_factory=SystemIntegrationSettings)
     privacy: PrivacySettings = field(default_factory=PrivacySettings)
     research: ResearchSettings = field(default_factory=ResearchSettings)
+    tasks: TasksSettings = field(default_factory=TasksSettings)
     ui: UIConfig = field(default_factory=UIConfig)
 
     def validate(self) -> "AppConfig":
@@ -470,6 +536,7 @@ class AppConfig:
         self.system.validate()
         self.privacy.validate()
         self.research.validate()
+        self.tasks.validate()
         self.ui.validate()
         return self
 
@@ -482,6 +549,7 @@ class AppConfig:
             "system": asdict(self.system),
             "privacy": asdict(self.privacy),
             "research": asdict(self.research),
+            "tasks": asdict(self.tasks),
             "ui": self.ui.to_dict(),
         }
 
@@ -506,6 +574,7 @@ class AppConfig:
             system=_section(SystemIntegrationSettings, "system"),
             privacy=_section(PrivacySettings, "privacy"),
             research=_section(ResearchSettings, "research"),
+            tasks=_section(TasksSettings, "tasks"),
             ui=UIConfig.from_dict(data.get("ui") or {}),
         )
         return cfg.validate()

@@ -58,6 +58,7 @@ from mimosa.skills.file_ops import FileOperationsSkill
 from mimosa.skills.greeting_skill import GreetingSkill
 from mimosa.skills.question_skill import QuestionSkill
 from mimosa.skills.research_skill import ResearchSkill
+from mimosa.skills.task_skill import TaskControlSkill
 from mimosa.skills.system_control import SystemControlSkill
 from mimosa.skills.system_info import SystemInfoSkill
 from mimosa.skills.time_skill import TimeSkill
@@ -76,6 +77,7 @@ INTENT_APPLICATION = "application"
 INTENT_SYSTEM = "system_control"
 INTENT_SYSTEM_INFO = "system_info"
 INTENT_RESEARCH = "research"
+INTENT_TASK = "task_control"
 INTENT_UNKNOWN = "unknown"
 
 SUPPORTED_INTENTS = (
@@ -87,6 +89,7 @@ SUPPORTED_INTENTS = (
     INTENT_SYSTEM,
     INTENT_SYSTEM_INFO,
     INTENT_RESEARCH,
+    INTENT_TASK,
     INTENT_QUESTION,
     INTENT_GREETING,
 )
@@ -273,6 +276,23 @@ _RESEARCH_PATTERNS = [
     r"\bwhat'?s\s+the\s+(latest|news)\b.*\b(on|about)\b",
 ]
 
+#: Background-task control (M7). Deliberately scoped to *task/queue* vocabulary
+#: or unambiguous conversational pause/resume phrases so it never hijacks
+#: system-control commands like "stop the music".
+_TASK_PATTERNS = [
+    r"\b(background\s+)?(task|tasks|job|jobs|queue)\b",
+    r"\bwhat\s+(are|re)\s+you\s+(working\s+on|doing|running)\b",
+    r"\bwhat\s+are\s+you\s+up\s+to\b",
+    r"\b(task|job)\s+(status|progress)\b",
+    r"\b(pause|resume|cancel|abort)\s+(the\s+|that\s+|my\s+|all\s+)?"
+    r"(task|tasks|job|jobs|queue|indexing|download|conversion|everything)\b",
+    r"\b(pause|resume|cancel)\s+everything\b",
+    r"\bhold\s+on\b",
+    r"\bhang\s+on\b",
+    r"\bcarry\s+on\b",
+    r"\bkeep\s+going\b",
+]
+
 
 def _matches_any(text: str, patterns: List[str]) -> bool:
     return any(re.search(p, text) for p in patterns)
@@ -320,6 +340,7 @@ class IntentRouter:
                 SystemInfoSkill(),
                 GreetingSkill(llm_provider=llm_provider),
                 ResearchSkill(llm_provider=llm_provider),
+                TaskControlSkill(),
                 QuestionSkill(llm_provider=llm_provider),
             ]
         self._skills: List[BaseSkill] = []
@@ -407,6 +428,15 @@ class IntentRouter:
             return IntentClassification(INTENT_SYSTEM_INFO, 0.92, source="heuristic")
         if _matches_any(lowered, _SYSTEM_PATTERNS):
             return IntentClassification(INTENT_SYSTEM, 0.93, source="heuristic")
+        # Background-task control (M7). Scoped to task/queue vocabulary and
+        # unambiguous pause/resume phrasing, so it routes "pause the indexing"
+        # or "what tasks are running?" to the queue without stealing
+        # system-control or application commands. Checked before the
+        # application patterns so "what tasks are running?" is not mistaken for
+        # "what apps are running?", and before the question-shape heuristic
+        # because some of these ("what are you working on?") end in a question.
+        if _matches_any(lowered, _TASK_PATTERNS):
+            return IntentClassification(INTENT_TASK, 0.9, source="heuristic")
         if _matches_any(lowered, _APP_PATTERNS):
             return IntentClassification(INTENT_APPLICATION, 0.9, source="heuristic")
         if _matches_any(lowered, _GREETING_PATTERNS):
