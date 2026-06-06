@@ -25,11 +25,19 @@ from mimosa.utils.config import (
     DEFAULT_SKILL_ORDER,
     LLM_PROVIDERS,
     MAX_HISTORY_LIMIT,
+    MAX_MAX_CONCURRENT_TASKS,
+    MAX_RESEARCH_MAX_SOURCES,
+    MAX_RESOURCE_THRESHOLD,
     MAX_TTS_SPEED,
     MAX_WAKE_SENSITIVITY,
     MIN_HISTORY_LIMIT,
+    MIN_MAX_CONCURRENT_TASKS,
+    MIN_RESEARCH_MAX_SOURCES,
+    MIN_RESOURCE_THRESHOLD,
     MIN_TTS_SPEED,
     MIN_WAKE_SENSITIVITY,
+    RESEARCH_BACKENDS,
+    VALID_VERBOSITY,
     WHISPER_MODELS,
 )
 from mimosa.ui.ui_config import (
@@ -85,9 +93,12 @@ class PageSpec:
 
 # -- Page identifiers (stable; used by the dialog & tests) -------------------
 PAGE_VOICE = "voice"
+PAGE_PERSONALIZE = "personalize"
 PAGE_SKILLS = "skills"
 PAGE_SYSTEM = "system"
 PAGE_PRIVACY = "privacy"
+PAGE_TASKS = "tasks"
+PAGE_RESEARCH = "research"
 PAGE_UI = "ui"
 PAGE_ABOUT = "about"
 
@@ -177,8 +188,71 @@ def build_page_specs() -> Tuple[PageSpec, ...]:
                       choices=MOUTH_STYLES),
         ),
     )
+    personalize = PageSpec(
+        PAGE_PERSONALIZE, "Personalization", "avatar-default-symbolic",
+        fields=(
+            FieldSpec("personality", "user_name", "What should I call you?",
+                      "text",
+                      help="Your preferred name. Leave blank to skip."),
+            FieldSpec("personality", "assistant_name",
+                      "What would you like to call me?", "text",
+                      help="A name for your assistant (defaults to 'MimOSA')."),
+            FieldSpec("personality", "user_pronouns", "Your pronouns", "text",
+                      help="Optional, e.g. 'she/her'. Used to personalise phrasing."),
+            FieldSpec("personality", "verbosity", "Response style", "choice",
+                      choices=VALID_VERBOSITY,
+                      help="How chatty MimOSA should be."),
+            FieldSpec("personality", "greet_by_name", "Greet me by name", "bool",
+                      help="Say hello using your name when MimOSA starts."),
+        ),
+    )
+    tasks = PageSpec(
+        PAGE_TASKS, "Background Tasks", "system-run-symbolic",
+        fields=(
+            FieldSpec("tasks", "background_tasks_enabled",
+                      "Enable background tasks", "bool",
+                      help="Run long jobs in the background. Off = nothing queued."),
+            FieldSpec("tasks", "max_concurrent", "Max concurrent tasks", "int",
+                      minimum=MIN_MAX_CONCURRENT_TASKS,
+                      maximum=MAX_MAX_CONCURRENT_TASKS, step=1,
+                      help="How many tasks may run at once."),
+            FieldSpec("tasks", "resource_monitoring",
+                      "Defer when system is busy", "bool",
+                      help="Use CPU/memory load to gate new task starts (needs psutil)."),
+            FieldSpec("tasks", "cpu_threshold", "CPU busy threshold (%)", "float",
+                      minimum=MIN_RESOURCE_THRESHOLD, maximum=MAX_RESOURCE_THRESHOLD,
+                      step=1.0, help="Defer new tasks at/above this CPU load."),
+            FieldSpec("tasks", "mem_threshold", "Memory busy threshold (%)",
+                      "float", minimum=MIN_RESOURCE_THRESHOLD,
+                      maximum=MAX_RESOURCE_THRESHOLD, step=1.0,
+                      help="Defer new tasks at/above this memory use."),
+            FieldSpec("tasks", "learn_error_fixes", "Learn error fixes", "bool",
+                      help="Remember which fixes resolved past errors (local only)."),
+        ),
+    )
+    research = PageSpec(
+        PAGE_RESEARCH, "Web Research", "system-search-symbolic",
+        fields=(
+            FieldSpec("research", "web_search_enabled", "Enable web search",
+                      "bool",
+                      help="Off by default. When on, MimOSA may fetch web sources."),
+            FieldSpec("research", "backend", "Search backend", "choice",
+                      choices=RESEARCH_BACKENDS,
+                      help="'none' keeps research fully offline even when enabled."),
+            FieldSpec("research", "max_sources", "Max sources per query", "int",
+                      minimum=MIN_RESEARCH_MAX_SOURCES,
+                      maximum=MAX_RESEARCH_MAX_SOURCES, step=1,
+                      help="How many sources to synthesise per question."),
+            FieldSpec("research", "include_budget_note",
+                      "Mention when sources were trimmed", "bool",
+                      help="Append a short note when the budget limited sources."),
+            FieldSpec("research", "learn_cost_patterns", "Learn cost patterns",
+                      "bool",
+                      help="Remember per-topic cost/budget patterns (local only)."),
+        ),
+    )
     about = PageSpec(PAGE_ABOUT, "About", "help-about-symbolic", fields=())
-    return (voice, skills, system, privacy, ui, about)
+    return (voice, personalize, skills, system, privacy, tasks, research, ui, about)
 
 
 # ---------------------------------------------------------------------------

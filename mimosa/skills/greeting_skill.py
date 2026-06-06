@@ -44,20 +44,46 @@ class GreetingSkill(BaseSkill):
     intents = ["greeting", "chitchat"]
     uses_llm = True
 
-    def __init__(self, llm_provider=None, max_tokens: int = 64) -> None:
+    def __init__(self, llm_provider=None, max_tokens: int = 64,
+                 personality=None) -> None:
         super().__init__(llm_provider=llm_provider)
         self.max_tokens = max_tokens
+        #: Optional :class:`~mimosa.utils.config.PersonalitySettings` from the
+        #: "Get to Know MimOSA" setup step. When present, greetings address the
+        #: user by name and adopt the chosen assistant name.
+        self.personality = personality
+
+    def _fallback_reply(self) -> str:
+        """A friendly local greeting, personalised when we know the user."""
+        p = self.personality
+        if p is not None and getattr(p, "greet_by_name", False) and getattr(p, "user_name", ""):
+            return f"Hello {p.user_name}! How can I help you today?"
+        return random.choice(_FALLBACK_REPLIES)
+
+    def _system_prompt(self) -> str:
+        p = self.personality
+        if p is None:
+            return GREETING_SYSTEM_PROMPT
+        extras = []
+        name = getattr(p, "assistant_name", "") or "MimOSA"
+        if name and name != "MimOSA":
+            extras.append(f"You are called {name}.")
+        if getattr(p, "user_name", ""):
+            extras.append(f"Address the user as {p.user_name} when natural.")
+        if not extras:
+            return GREETING_SYSTEM_PROMPT
+        return GREETING_SYSTEM_PROMPT + " " + " ".join(extras)
 
     def handle(self, text: str, context: Optional[List] = None) -> SkillResult:
         # No LLM configured -> use a friendly local fallback.
         if self.llm is None:
             return SkillResult(
-                text=random.choice(_FALLBACK_REPLIES),
+                text=self._fallback_reply(),
                 skill=self.name,
                 metadata={"source": "fallback"},
             )
 
-        messages: List[Message] = [Message(role=Role.SYSTEM, content=GREETING_SYSTEM_PROMPT)]
+        messages: List[Message] = [Message(role=Role.SYSTEM, content=self._system_prompt())]
         if context:
             messages.extend(context[-4:])
         messages.append(Message(role=Role.USER, content=text))
@@ -67,12 +93,12 @@ class GreetingSkill(BaseSkill):
         except LLMError as exc:
             self.logger.info("LLM greeting failed, using fallback: %s", exc)
             return SkillResult(
-                text=random.choice(_FALLBACK_REPLIES),
+                text=self._fallback_reply(),
                 skill=self.name,
                 metadata={"source": "fallback", "error": str(exc)},
             )
 
-        reply = (response.content or "").strip() or random.choice(_FALLBACK_REPLIES)
+        reply = (response.content or "").strip() or self._fallback_reply()
         return SkillResult(
             text=reply,
             skill=self.name,

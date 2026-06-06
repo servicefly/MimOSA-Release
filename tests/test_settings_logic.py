@@ -10,8 +10,11 @@ import pytest
 from mimosa.utils.config import AppConfigManager
 from mimosa.ui.settings_logic import (
     PAGE_ABOUT,
+    PAGE_PERSONALIZE,
     PAGE_PRIVACY,
+    PAGE_RESEARCH,
     PAGE_SKILLS,
+    PAGE_TASKS,
     PAGE_UI,
     PAGE_VOICE,
     SettingsController,
@@ -38,7 +41,32 @@ def controller(manager):
 
 def test_page_specs_cover_all_required_pages():
     ids = [p.page_id for p in build_page_specs()]
-    assert ids == [PAGE_VOICE, PAGE_SKILLS, "system", PAGE_PRIVACY, PAGE_UI, PAGE_ABOUT]
+    assert ids == [
+        PAGE_VOICE, PAGE_PERSONALIZE, PAGE_SKILLS, "system", PAGE_PRIVACY,
+        PAGE_TASKS, PAGE_RESEARCH, PAGE_UI, PAGE_ABOUT,
+    ]
+
+
+def test_tasks_and_research_pages_have_toggles_and_help():
+    pages = {p.page_id: p for p in build_page_specs()}
+    tasks = pages[PAGE_TASKS]
+    research = pages[PAGE_RESEARCH]
+    task_fields = {f.name for f in tasks.fields}
+    assert {"background_tasks_enabled", "resource_monitoring",
+            "learn_error_fixes"} <= task_fields
+    research_fields = {f.name for f in research.fields}
+    assert "web_search_enabled" in research_fields
+    # Accessibility: every field on these pages has a label and help text.
+    for page in (tasks, research, pages[PAGE_PERSONALIZE]):
+        for f in page.fields:
+            assert f.label, f"{page.page_id}.{f.name} missing label"
+            assert f.help, f"{page.page_id}.{f.name} missing help"
+
+
+def test_all_fields_have_labels_for_accessibility():
+    for page in build_page_specs():
+        for f in page.fields:
+            assert f.label, f"{page.page_id}.{f.name} has no accessible label"
 
 
 def test_controller_exposes_pages(controller):

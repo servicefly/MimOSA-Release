@@ -27,6 +27,9 @@ PREFERENCES_DB = "preferences.db"
 PRIVATE_DB = "private.db"
 SEMANTIC_DIR = "semantic"
 TASKS_DB = "tasks.db"
+#: Sub-directory (under the data dir) and file name for application logs (M8.2).
+LOGS_DIR = "logs"
+LOG_FILE = "mimosa.log"
 
 
 def default_data_dir() -> Path:
@@ -69,8 +72,25 @@ def tasks_db_path() -> Path:
     return default_data_dir() / TASKS_DB
 
 
+def log_dir() -> Path:
+    """Directory for MimOSA's rotating application logs (M8.2)."""
+    return default_data_dir() / LOGS_DIR
+
+
+def log_file_path() -> Path:
+    """Absolute path to the main rotating log file (M8.2)."""
+    return log_dir() / LOG_FILE
+
+
 def ensure_data_dir() -> Path:
     """Create (if needed) and return the base data directory."""
     d = default_data_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def ensure_log_dir() -> Path:
+    """Create (if needed) and return the log directory."""
+    d = log_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d

@@ -320,8 +320,16 @@ class IntentRouter:
         confidence_threshold: Optional[float] = None,
         skills: Optional[List[BaseSkill]] = None,
         custom_skills: Optional[List[CustomSkill]] = None,
+        error_reporter=None,
+        personality=None,
     ) -> None:
         self.llm = llm_provider
+        #: Optional personalisation (M8.4a) injected into personable skills.
+        self.personality = personality
+        #: Optional :class:`~mimosa.core.error_reporter.ErrorReporter` (M8.1).
+        #: When present, failed skill results carry a friendly message and, if
+        #: the M7.3 learner knows one, a previously-successful fix suggestion.
+        self.error_reporter = error_reporter
         self.confidence_threshold = (
             confidence_threshold
             if confidence_threshold is not None
@@ -338,7 +346,7 @@ class IntentRouter:
                 ApplicationSkill(),
                 SystemControlSkill(),
                 SystemInfoSkill(),
-                GreetingSkill(llm_provider=llm_provider),
+                GreetingSkill(llm_provider=llm_provider, personality=personality),
                 ResearchSkill(llm_provider=llm_provider),
                 TaskControlSkill(),
                 QuestionSkill(llm_provider=llm_provider),
@@ -597,4 +605,37 @@ class IntentRouter:
         result.metadata.setdefault("intent", intent)
         result.metadata.setdefault("confidence", confidence)
         result.metadata.setdefault("classification_source", classification.source)
+        return self._enrich_errors(result)
+
+    def _enrich_errors(self, result: SkillResult) -> SkillResult:
+        """If a skill failed with an exception, add a known-fix suggestion (M8.1).
+
+        ``BaseSkill.run`` already converts exceptions into a graceful, speakable
+        ``SkillResult`` (``success=False`` with ``metadata['error']``). When an
+        :class:`ErrorReporter` is wired and the M7.3 learner knows a fix that
+        previously resolved this error, append it to the spoken text and tag the
+        result with the error signature/category. Never raises.
+        """
+        reporter = self.error_reporter
+        if reporter is None or result.success:
+            return result
+        raw = result.metadata.get("error")
+        if not raw:
+            return result
+        try:
+            learner = getattr(reporter, "learner", None)
+            if learner is None or not getattr(learner, "available", False):
+                return result
+            from mimosa.tasks.error_learner import normalize_error
+
+            signature = normalize_error(str(raw))
+            result.metadata.setdefault("error_signature", signature)
+            sug = learner.suggest_fix(str(raw))
+            if sug is not None:
+                fix = getattr(sug, "fix", None)
+                if fix:
+                    result.metadata["fix_suggestion"] = fix
+                    result.text = f"{result.text} Last time, this was fixed by: {fix}."
+        except Exception:  # pragma: no cover - enrichment is best-effort
+            logger.debug("Error enrichment failed", exc_info=True)
         return result

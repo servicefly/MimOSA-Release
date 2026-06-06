@@ -110,12 +110,16 @@ class VoiceLoop:
         conversation_manager=None,
         response_handler: Optional[ResponseHandler] = None,
         max_record_seconds: float = 15.0,
+        error_reporter=None,
+        personality=None,
     ) -> None:
         self._audio = audio_manager
         self._wake = wake_word_detector
         self._stt = stt
         self._tts = tts
         self._router = intent_router
+        self._error_reporter = error_reporter
+        self._personality = personality
         self._conversation = conversation_manager
         # When an explicit response_handler is given (and no router), use the
         # legacy handler path; otherwise the intent router drives responses.
@@ -238,7 +242,10 @@ class VoiceLoop:
                 logger.debug("Could not load custom skills (%s)", exc)
 
             self._router = IntentRouter(
-                llm_provider=provider, custom_skills=custom_skills
+                llm_provider=provider,
+                custom_skills=custom_skills,
+                error_reporter=self._error_reporter,
+                personality=self._personality,
             )
         return self._router
 

@@ -57,6 +57,67 @@ Screenshots of the real dialog:
 |-------|--------|----------------|
 | ![Voice](images/settings_voice.png) | ![Skills](images/settings_skills.png) | ![Privacy](images/settings_privacy.png) |
 
+The full page list is: **Voice**, **Personalization**, **Skills**, **System
+Integration**, **Privacy & Data**, **Background Tasks**, **Web Research**,
+**Appearance**, and **About**.
+
+> **Accessibility:** every control on every page (and in the first-run wizard)
+> has a screen-reader label and an inline help line, supports full keyboard
+> navigation (Tab / Shift-Tab / arrows / space / Enter), and is legible in
+> high-contrast themes.
+
+---
+
+## First-run setup wizard
+
+The very first time you launch MimOSA, a short wizard appears. Besides the
+voice, privacy, and system steps, it includes a **"Get to Know MimOSA"** step
+that personalizes the assistant:
+
+| Field | What it does |
+|-------|--------------|
+| Your name | MimOSA greets you by name (e.g. *"Hello Ada!"*). |
+| What to call the assistant | Renames the assistant (default: *MimOSA*). |
+| Your pronouns | Used to refer to you naturally. |
+| Chattiness | `brief` / `balanced` / `detailed` response style. |
+| Greet me by name | Toggle personal greetings on or off. |
+
+Everything here is optional and can be changed later in **Settings →
+Personalization**. Nothing is sent anywhere — it's stored in your local config.
+
+---
+
+## Personalization
+
+Mirrors the wizard's "Get to Know MimOSA" choices so you can adjust them any
+time: your name, the assistant's name, your pronouns, verbosity, and whether to
+greet you by name.
+
+---
+
+## Background Tasks
+
+Controls the optional Phase 7 background task queue:
+
+| Setting | Effect |
+|---------|--------|
+| Enable background tasks | Master switch for the background worker queue. |
+| Max concurrent tasks | How many tasks may run at once. |
+| Resource monitoring | Pause background work when the system is busy. |
+| CPU / memory thresholds | The busy-ness levels that trigger a pause. |
+| Learn error fixes | Let MimOSA remember which fixes resolved past errors and suggest them next time — all on-device. |
+
+Everything is **off-by-default-safe**: with background tasks disabled, no worker
+threads start, and the graceful-error reporter still works.
+
+---
+
+## Web Research
+
+Controls the optional Phase 6 multi-source research pipeline (web searching and
+summarization). You can enable/disable it and tune how many sources it consults.
+Like everything else, it is opt-in and privacy-aware.
+
 ---
 
 ## Voice
@@ -183,6 +244,35 @@ backward compatibility.
 Because everything is a plain local file, you can back it up, version-control
 it, or hand-edit it — out-of-range values are clamped to safe bounds on the next
 load rather than rejected.
+
+---
+
+## Where logs are stored
+
+MimOSA writes a single rotating log file:
+
+```
+~/.local/share/mimosa/logs/mimosa.log
+```
+
+It rotates at ~1 MiB and keeps 3 backups (`mimosa.log.1` … `.3`), so it never
+grows without bound. Logs record events and errors only — **no message
+content** — keeping them privacy-safe. Run `mimosa --check` to print the exact
+path, launch with `--verbose` for more detail, or `--no-log-file` to log only to
+the console.
+
+Whenever something goes wrong, MimOSA shows you a calm, plain-language message
+and writes the full technical detail to this log — a traceback never reaches the
+screen.
+
+---
+
+## Data maintenance
+
+On startup MimOSA applies your **Privacy & Data → data-retention** setting:
+messages older than the chosen period are purged and the database is compacted
+(`VACUUM`) to reclaim disk space. A retention of *0* means "keep forever". This
+runs quietly in the background and never blocks startup.
 
 ---
 
