@@ -486,6 +486,24 @@ class ConversationStore:
             self._conn.commit()
         return int(deleted)
 
+    def vacuum(self) -> bool:
+        """Reclaim free space by running SQLite ``VACUUM``.
+
+        Called periodically (see :class:`mimosa.core.runtime.AppServices`) after
+        retention purges so the on-disk database does not keep growing. No-op
+        for in-memory databases. Returns ``True`` on success, ``False`` if the
+        operation failed (defensive: maintenance should never crash the app).
+        """
+        if self._is_memory:
+            return False
+        with self._lock:
+            try:
+                self._conn.execute("VACUUM")
+                self._conn.commit()
+                return True
+            except Exception:  # pragma: no cover - defensive
+                return False
+
     def clear_all(self) -> None:
         """Remove every session and message (factory reset of history)."""
         with self._lock:

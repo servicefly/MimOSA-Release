@@ -147,7 +147,9 @@ class TestMain:
                 pass
 
         # Patch VoiceLoop so MimOSAApplication builds our fake.
-        monkeypatch.setattr("mimosa.voice.voice_loop.VoiceLoop", lambda: Loop())
+        monkeypatch.setattr(
+            "mimosa.voice.voice_loop.VoiceLoop", lambda *a, **k: Loop()
+        )
         rc = main(["--no-gui"])
         assert rc == 0
         assert ran["v"] is True

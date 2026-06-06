@@ -67,6 +67,7 @@ class MimOSAApplication:
         self._gtk_app = None
         self._settings_dialog = None
         self._voice_thread: Optional[threading.Thread] = None
+        self._services = None
         # M4.3 companions (all optional / created lazily under GTK).
         self._tray = None
         self._chat_controller = None
@@ -78,12 +79,33 @@ class MimOSAApplication:
     # -- voice loop --------------------------------------------------------
 
     @property
+    def services(self):
+        """The optional runtime services (M7 stack + error reporter), lazily built.
+
+        Constructed from the unified config so the background task queue,
+        resource monitor and error-fix learner all honour the user's
+        :class:`~mimosa.utils.config.TasksSettings` toggles. Best-effort: any
+        failure degrades to ``None`` collaborators rather than crashing startup.
+        """
+        if self._services is None:
+            from mimosa.core.runtime import AppServices
+
+            try:
+                self._services = AppServices.from_config(self.config_manager.get())
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Could not build runtime services", exc_info=True)
+                self._services = AppServices()  # inert fallback
+        return self._services
+
+    @property
     def voice_loop(self):
         """The voice loop, constructed on first use."""
         if self._voice_loop is None:
             from mimosa.voice.voice_loop import VoiceLoop
 
-            self._voice_loop = VoiceLoop()
+            self._voice_loop = VoiceLoop(
+                error_reporter=self.services.error_reporter
+            )
         return self._voice_loop
 
     def _start_voice_thread(self) -> None:
@@ -106,6 +128,28 @@ class MimOSAApplication:
             pass
         if self.bridge is not None:
             self.bridge.unsubscribe()
+        if self._services is not None:
+            try:
+                self._services.shutdown()
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+    def _start_services(self) -> None:
+        """Start background services and apply data-retention maintenance.
+
+        Best-effort and non-fatal: a failure here must never prevent MimOSA from
+        starting up.
+        """
+        try:
+            # Attach the real conversation store so retention/vacuum can run.
+            if self.services.conversation_store is None:
+                from mimosa.memory.conversation_store import ConversationStore
+
+                self.services.conversation_store = ConversationStore()
+            self.services.start()
+            self.services.run_maintenance()
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Runtime services could not start", exc_info=True)
 
     # -- headless mode -----------------------------------------------------
 
@@ -134,6 +178,7 @@ class MimOSAApplication:
         """Run the voice loop directly with no GUI. Returns a process exit code."""
         logger.info("Starting MimOSA in headless mode (%s)", describe_environment())
         self._maybe_run_setup_wizard()
+        self._start_services()
         try:
             self.voice_loop.run()
         except KeyboardInterrupt:  # pragma: no cover - interactive
@@ -193,6 +238,9 @@ class MimOSAApplication:
 
             if not self.config.start_hidden:
                 window.present()
+
+            # Start optional runtime services (M7 stack) + data maintenance.
+            self._start_services()
 
             # Kick off the voice loop only once the window is live.
             self._start_voice_thread()
