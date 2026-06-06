@@ -35,8 +35,24 @@ llama.cpp) with no code changes.
 > optional **system-tray** icon, a **text-chat window** that shares the voice
 > loop's brain, and a **sprite/expression-layer** model atop the procedural
 > avatar. Everything degrades gracefully to a full headless fallback, every
-> setting is stored locally with **no telemetry**, and all **849 automated tests**
-> pass offline (more GTK-gated widget tests run on a desktop session).
+> setting is stored locally with **no telemetry**.
+>
+> **Phases 5–8 are complete.** **Phase 5 (Memory & Learning)** adds the
+> encrypted conversation store, preference learning, and proactive context.
+> **Phase 6 (Research)** adds the privacy-aware multi-source web-research
+> pipeline. **Phase 7 (Advanced Features)** adds the background **task queue**,
+> the **resource monitor**, and on-device **error-fix learning**. **Phase 8
+> (Polish & Testing) — the final pre-release milestone — is complete:** graceful
+> error UX (no traceback ever reaches the user), rotating file logging in one
+> documented location, runtime wiring of the Phase 7 services behind settings
+> toggles, a *"Get to Know MimOSA"* personalization step in the setup wizard,
+> accessibility-labelled settings pages, one-command **install/uninstall**
+> scripts with a `pyproject.toml` package (`mimosa` console command), and a
+> comprehensive **1,377-test** suite that runs fully offline (more GTK-gated
+> widget tests run on a desktop session). This release is tagged
+> **`v1.0.0-rc.1`**. See **[INSTALL.md](INSTALL.md)**,
+> **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**, and
+> **[RELEASE_NOTES.md](RELEASE_NOTES.md)**.
 
 ---
 
@@ -82,46 +98,71 @@ abstraction layer and how local-LLM support plugs in.
 
 ## 🚀 Setup
 
+> **The fastest path:** see **[INSTALL.md](INSTALL.md)** for a dead-simple,
+> copy-paste install. The short version is below.
+
+### Dead-simple install (recommended)
+
+```bash
+git clone https://github.com/servicefly/MimOSA.git
+cd MimOSA
+./install.sh            # core install into a .venv
+# optional extras:
+./install.sh --with-voice   # add the on-device voice stack (needs PortAudio)
+./install.sh --with-ui      # add the GTK4 avatar / companion UI
+./install.sh --with-all     # everything
+```
+
+The script verifies Python ≥ 3.10, creates a virtual environment, installs
+MimOSA as a package (giving you a `mimosa` command), and prints exactly where
+your config, data, and **log files** live. To remove everything later, run
+`./uninstall.sh` (add `--purge` to also delete your data and config).
+
+Once installed:
+
+```bash
+source .venv/bin/activate
+mimosa --check     # verify the environment and show the log location
+mimosa             # launch (GUI if available, otherwise headless voice loop)
+```
+
 ### Prerequisites
 
 - **Python 3.10+** (developed and tested on 3.11)
 - A Linux desktop (primary target: Kubuntu / Ubuntu 24.04+; adaptable to other
   distros)
-- System library for audio capture:
+- System library for audio capture (only for the voice extra):
   ```bash
   sudo apt install portaudio19-dev
   ```
 
-### 1. Clone and enter the project
+### Manual install (alternative)
+
+If you prefer not to use the script:
 
 ```bash
 git clone https://github.com/servicefly/MimOSA.git
 cd MimOSA
-```
-
-### 2. Create a virtual environment
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-### 3. Install dependencies
-
-```bash
-pip install -r requirements.txt
+pip install -e ".[voice,ui]"   # or: pip install -r requirements.txt
 ```
 
 > `openai-whisper` pulls in PyTorch, which is a large download. The first run
 > also downloads the Whisper and Piper voice models.
 
-### 4. Configure your environment
+### Configure your environment (optional)
+
+MimOSA runs out of the box; configuration is only needed to enable cloud LLM or
+wake-word features. The first launch also opens a **first-run setup wizard**
+(including a *"Get to Know MimOSA"* step where you tell it your name and what to
+call it). To set values up front:
 
 ```bash
 cp .env.example .env
 ```
 
-Then edit `.env` and set your values:
+Then edit `.env`:
 
 | Variable | Purpose |
 |----------|---------|
@@ -130,14 +171,18 @@ Then edit `.env` and set your values:
 | `PORCUPINE_ACCESS_KEY` | Picovoice key for wake-word detection. |
 | `LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`. |
 
-### 5. Verify your environment
+### Verify your environment
 
 ```bash
-python scripts/health_check.py
+mimosa --check                 # if installed as a package
+python scripts/health_check.py # deeper dependency / connectivity check
 ```
 
-This checks your Python version, dependency imports, Abacus.AI connectivity
-(if a key is present), and prints system info.
+`mimosa --check` prints system info and the exact **log file location**. The
+health-check script additionally verifies dependency imports and Abacus.AI
+connectivity (if a key is present).
+
+> **Having trouble?** See the **[Troubleshooting guide](docs/TROUBLESHOOTING.md)**.
 
 ---
 
