@@ -386,3 +386,57 @@ class TestConversationManager:
         assert records[0]["user_text"] == "u"
         assert records[0]["intent"] == "time"
         assert "session_id" in records[0] and "timestamp" in records[0]
+
+
+
+# ---------------------------------------------------------------------------
+# Research intent classification & routing (M6)
+# ---------------------------------------------------------------------------
+
+class TestResearchIntent:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "research electric cars",
+            "do some research on tariffs",
+            "look into the housing market",
+            "investigate vaccine safety",
+            "dig into the climate debate",
+            "find out about quantum computing",
+            "what are people saying about remote work?",
+            "give me a balanced overview of the minimum wage debate",
+            "what are the different perspectives on nuclear energy",
+            "search the web for AI regulation news",
+        ],
+    )
+    def test_research_queries_classified_as_research(self, text):
+        from mimosa.core.intent_router import INTENT_RESEARCH
+
+        router = IntentRouter()
+        assert router.classify(text).intent == INTENT_RESEARCH
+
+    @pytest.mark.parametrize(
+        "text,intent",
+        [
+            ("what time is it?", INTENT_TIME),
+            ("what is 2 + 2?", INTENT_CALCULATOR),
+            ("what is the capital of France?", INTENT_QUESTION),
+            ("what's the weather in Paris?", INTENT_WEATHER),
+        ],
+    )
+    def test_non_research_questions_unaffected(self, text, intent):
+        router = IntentRouter()
+        assert router.classify(text).intent == intent
+
+    def test_research_skill_registered_by_default(self):
+        from mimosa.core.intent_router import INTENT_RESEARCH
+
+        router = IntentRouter()
+        assert INTENT_RESEARCH in router._by_intent
+
+    def test_route_to_research_skill_offline(self):
+        # Default research engine is offline -> graceful message, success False.
+        router = IntentRouter()
+        result = router.route("research electric cars")
+        assert result.skill == "research"
+        assert "web search" in result.text.lower()
