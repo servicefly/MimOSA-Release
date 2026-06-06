@@ -371,20 +371,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable debug logging.",
     )
+    p.add_argument(
+        "--no-log-file",
+        action="store_true",
+        help="Log to the console only; do not write the rotating log file.",
+    )
     return p
 
 
 def main(argv=None) -> int:
     """Console entry point. Returns a process exit code."""
+    from mimosa.utils.logging_setup import configure_logging
+
     args = build_arg_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(verbose=args.verbose, to_file=not args.no_log_file)
 
     if args.check:
+        from mimosa.utils.logging_setup import describe_log_location
+
         print("MimOSA environment:")
         print("  " + describe_environment())
+        print("  " + describe_log_location())
         return 0
 
     try:
