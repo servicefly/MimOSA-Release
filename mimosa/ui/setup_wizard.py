@@ -27,6 +27,7 @@ from mimosa.utils.config import (
     MAX_WAKE_SENSITIVITY,
     MIN_HISTORY_LIMIT,
     MIN_WAKE_SENSITIVITY,
+    VALID_VERBOSITY,
     WHISPER_MODELS,
 )
 from mimosa.ui.settings_logic import FieldSpec
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 # -- step identifiers (stable; used by the view & tests) --------------------
 STEP_WELCOME = "welcome"
+STEP_PERSONALIZE = "personalize"
 STEP_VOICE = "voice"
 STEP_PRIVACY = "privacy"
 STEP_SYSTEM = "system"
@@ -59,6 +61,30 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "MimOSA is your private, local-first voice assistant. This quick setup "
         "tunes a few preferences. Nothing you enter ever leaves your device.",
         fields=(),
+    )
+    personalize = WizardStep(
+        STEP_PERSONALIZE,
+        "Get to Know MimOSA",
+        "Let's get acquainted! Tell MimOSA a little about you so it can greet "
+        "you by name and match your style. Every field is optional and stays "
+        "on your device.",
+        fields=(
+            FieldSpec("personality", "user_name", "What should I call you?",
+                      "text",
+                      help="Your preferred name (e.g. 'Sam'). Leave blank to skip."),
+            FieldSpec("personality", "assistant_name", "What would you like to "
+                      "call me?", "text",
+                      help="A name for your assistant (defaults to 'MimOSA')."),
+            FieldSpec("personality", "user_pronouns", "Your pronouns (optional)",
+                      "text",
+                      help="e.g. 'she/her', 'they/them'. Used only to personalise phrasing."),
+            FieldSpec("personality", "verbosity", "How chatty should I be?",
+                      "choice", choices=VALID_VERBOSITY,
+                      help="'brief' = short answers, 'detailed' = more explanation."),
+            FieldSpec("personality", "greet_by_name", "Greet me by name",
+                      "bool",
+                      help="Say hello using your name when MimOSA starts."),
+        ),
     )
     voice = WizardStep(
         STEP_VOICE,
@@ -115,7 +141,7 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "Open Settings anytime to fine-tune things.",
         fields=(),
     )
-    return (welcome, voice, privacy, system, finish)
+    return (welcome, personalize, voice, privacy, system, finish)
 
 
 class SetupWizardController:

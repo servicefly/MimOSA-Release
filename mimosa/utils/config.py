@@ -118,6 +118,14 @@ MAX_RESEARCH_PER_CATEGORY_CAP = 25
 RESEARCH_BACKENDS = ("none", "duckduckgo")
 DEFAULT_RESEARCH_BACKEND = "duckduckgo"
 
+# -- Personalisation ("Get to Know MimOSA") ---------------------------------
+DEFAULT_ASSISTANT_NAME = "MimOSA"
+#: Hard cap on stored personalisation strings so a pasted essay can't bloat the
+#: config or a spoken greeting. Values are trimmed, never rejected.
+MAX_PERSONALIZATION_LEN = 80
+VALID_VERBOSITY = ("brief", "balanced", "detailed")
+DEFAULT_VERBOSITY = "balanced"
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
@@ -502,6 +510,54 @@ class ResearchSettings:
         return self
 
 
+@dataclass
+class PersonalitySettings:
+    """User personalisation captured by the "Get to Know MimOSA" wizard step.
+
+    Everything here is optional and stored locally only -- it shapes how MimOSA
+    greets and addresses the user. Empty strings mean "not provided" and the
+    assistant falls back to neutral defaults. Strings are trimmed to
+    :data:`MAX_PERSONALIZATION_LEN` so they stay safe to speak and store.
+    """
+
+    #: What the user would like to be called (e.g. "Sam"). Blank = unknown.
+    user_name: str = ""
+    #: What the user wants to call the assistant. Defaults to "MimOSA".
+    assistant_name: str = DEFAULT_ASSISTANT_NAME
+    #: Optional pronouns for the user, used to personalise phrasing if set.
+    user_pronouns: str = ""
+    #: How chatty MimOSA should be: "brief" | "balanced" | "detailed".
+    verbosity: str = DEFAULT_VERBOSITY
+    #: When True, MimOSA greets the user by name on startup.
+    greet_by_name: bool = True
+
+    def _trim(self, value) -> str:
+        try:
+            text = str(value).strip()
+        except Exception:
+            return ""
+        return text[:MAX_PERSONALIZATION_LEN]
+
+    def validate(self) -> "PersonalitySettings":
+        self.user_name = self._trim(self.user_name)
+        self.assistant_name = self._trim(self.assistant_name) or DEFAULT_ASSISTANT_NAME
+        self.user_pronouns = self._trim(self.user_pronouns)
+        verbosity = self._trim(self.verbosity).lower()
+        self.verbosity = verbosity if verbosity in VALID_VERBOSITY else DEFAULT_VERBOSITY
+        self.greet_by_name = bool(self.greet_by_name)
+        return self
+
+    def display_user(self) -> str:
+        """A safe label for the user ("there" when no name is known)."""
+        return self.user_name or "there"
+
+    def greeting(self) -> str:
+        """A friendly, personalised greeting line."""
+        if self.greet_by_name and self.user_name:
+            return f"Hi {self.user_name}, I'm {self.assistant_name}."
+        return f"Hi, I'm {self.assistant_name}."
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -523,6 +579,7 @@ class AppConfig:
     privacy: PrivacySettings = field(default_factory=PrivacySettings)
     research: ResearchSettings = field(default_factory=ResearchSettings)
     tasks: TasksSettings = field(default_factory=TasksSettings)
+    personality: PersonalitySettings = field(default_factory=PersonalitySettings)
     ui: UIConfig = field(default_factory=UIConfig)
 
     def validate(self) -> "AppConfig":
@@ -537,6 +594,7 @@ class AppConfig:
         self.privacy.validate()
         self.research.validate()
         self.tasks.validate()
+        self.personality.validate()
         self.ui.validate()
         return self
 
@@ -550,6 +608,7 @@ class AppConfig:
             "privacy": asdict(self.privacy),
             "research": asdict(self.research),
             "tasks": asdict(self.tasks),
+            "personality": asdict(self.personality),
             "ui": self.ui.to_dict(),
         }
 
@@ -575,6 +634,7 @@ class AppConfig:
             privacy=_section(PrivacySettings, "privacy"),
             research=_section(ResearchSettings, "research"),
             tasks=_section(TasksSettings, "tasks"),
+            personality=_section(PersonalitySettings, "personality"),
             ui=UIConfig.from_dict(data.get("ui") or {}),
         )
         return cfg.validate()

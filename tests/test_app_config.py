@@ -374,3 +374,64 @@ def test_appconfig_old_payload_without_tasks_gets_defaults():
 
 def test_tasks_in_default_skill_order():
     assert "tasks" in DEFAULT_SKILL_ORDER
+
+
+# ---------------------------------------------------------------------------
+# PersonalitySettings ("Get to Know MimOSA", M8.4a)
+# ---------------------------------------------------------------------------
+
+def test_personality_defaults():
+    cfg = AppConfig()
+    assert cfg.personality.user_name == ""
+    assert cfg.personality.assistant_name == "MimOSA"
+    assert cfg.personality.verbosity == "balanced"
+    assert cfg.personality.greet_by_name is True
+
+
+def test_personality_validate_trims_and_coerces():
+    from mimosa.utils.config import PersonalitySettings
+
+    p = PersonalitySettings(
+        user_name="  Sam  ",
+        assistant_name="   ",
+        verbosity="LOUD",
+    ).validate()
+    assert p.user_name == "Sam"
+    assert p.assistant_name == "MimOSA"  # blank -> default
+    assert p.verbosity == "balanced"  # invalid -> default
+
+
+def test_personality_long_value_trimmed():
+    from mimosa.utils.config import PersonalitySettings, MAX_PERSONALIZATION_LEN
+
+    p = PersonalitySettings(user_name="x" * 500).validate()
+    assert len(p.user_name) == MAX_PERSONALIZATION_LEN
+
+
+def test_personality_round_trip():
+    cfg = AppConfig()
+    cfg.personality.user_name = "Robin"
+    cfg.personality.assistant_name = "Echo"
+    cfg.validate()
+    data = cfg.to_dict()
+    restored = AppConfig.from_dict(data)
+    assert restored.personality.user_name == "Robin"
+    assert restored.personality.assistant_name == "Echo"
+    assert restored.to_dict() == data
+
+
+def test_personality_old_payload_gets_defaults():
+    cfg = AppConfig.from_dict({"version": 1, "voice": {}})
+    assert cfg.personality.assistant_name == "MimOSA"
+    assert cfg.personality.verbosity == "balanced"
+
+
+def test_personality_greeting_variants():
+    from mimosa.utils.config import PersonalitySettings
+
+    p = PersonalitySettings(user_name="Lee", assistant_name="Nova").validate()
+    assert p.greeting() == "Hi Lee, I'm Nova."
+    p.greet_by_name = False
+    assert p.greeting() == "Hi, I'm Nova."
+    p2 = PersonalitySettings().validate()
+    assert p2.display_user() == "there"

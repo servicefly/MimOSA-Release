@@ -321,8 +321,11 @@ class IntentRouter:
         skills: Optional[List[BaseSkill]] = None,
         custom_skills: Optional[List[CustomSkill]] = None,
         error_reporter=None,
+        personality=None,
     ) -> None:
         self.llm = llm_provider
+        #: Optional personalisation (M8.4a) injected into personable skills.
+        self.personality = personality
         #: Optional :class:`~mimosa.core.error_reporter.ErrorReporter` (M8.1).
         #: When present, failed skill results carry a friendly message and, if
         #: the M7.3 learner knows one, a previously-successful fix suggestion.
@@ -343,7 +346,7 @@ class IntentRouter:
                 ApplicationSkill(),
                 SystemControlSkill(),
                 SystemInfoSkill(),
-                GreetingSkill(llm_provider=llm_provider),
+                GreetingSkill(llm_provider=llm_provider, personality=personality),
                 ResearchSkill(llm_provider=llm_provider),
                 TaskControlSkill(),
                 QuestionSkill(llm_provider=llm_provider),

@@ -104,7 +104,8 @@ class MimOSAApplication:
             from mimosa.voice.voice_loop import VoiceLoop
 
             self._voice_loop = VoiceLoop(
-                error_reporter=self.services.error_reporter
+                error_reporter=self.services.error_reporter,
+                personality=self.config_manager.get().personality,
             )
         return self._voice_loop
 

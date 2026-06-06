@@ -11,6 +11,7 @@ import pytest
 from mimosa.utils.config import AppConfig, AppConfigManager
 from mimosa.ui.setup_wizard import (
     STEP_FINISH,
+    STEP_PERSONALIZE,
     STEP_PRIVACY,
     STEP_SYSTEM,
     STEP_VOICE,
@@ -37,7 +38,8 @@ def manager(tmp_path, monkeypatch):
 def test_build_wizard_steps_order():
     steps = build_wizard_steps()
     assert [s.step_id for s in steps] == [
-        STEP_WELCOME, STEP_VOICE, STEP_PRIVACY, STEP_SYSTEM, STEP_FINISH
+        STEP_WELCOME, STEP_PERSONALIZE, STEP_VOICE, STEP_PRIVACY,
+        STEP_SYSTEM, STEP_FINISH
     ]
     assert all(isinstance(s, WizardStep) for s in steps)
 
@@ -71,7 +73,7 @@ def test_navigation_forward_back(manager):
     assert w.is_first
     assert w.current_step.step_id == STEP_WELCOME
     w.next()
-    assert w.current_step.step_id == STEP_VOICE
+    assert w.current_step.step_id == STEP_PERSONALIZE
     w.back()
     assert w.current_step.step_id == STEP_WELCOME
 
@@ -193,3 +195,53 @@ def test_finish_without_persist(manager):
     fresh = AppConfigManager(path=manager.path)
     fresh.load()
     assert fresh.get().voice.wake_word != "ephemeral"
+
+
+
+# ---------------------------------------------------------------------------
+# "Get to Know MimOSA" personalisation step (M8.4a)
+# ---------------------------------------------------------------------------
+
+def test_personalize_step_present_and_has_fields():
+    steps = {s.step_id: s for s in build_wizard_steps()}
+    assert STEP_PERSONALIZE in steps
+    step = steps[STEP_PERSONALIZE]
+    assert step.title == "Get to Know MimOSA"
+    names = {f.name for f in step.fields}
+    assert {"user_name", "assistant_name", "verbosity", "greet_by_name"} <= names
+    # Accessibility: every field carries a label and help text.
+    for f in step.fields:
+        assert f.label
+        assert f.help
+
+
+def test_personalize_values_persist_on_finish(manager):
+    w = SetupWizardController(manager)
+    w.goto(STEP_PERSONALIZE)
+    w.set_value("personality", "user_name", "  Alex  ")
+    w.set_value("personality", "assistant_name", "Ada")
+    w.set_value("personality", "verbosity", "brief")
+    w.finish()
+
+    p = manager.get().personality
+    assert p.user_name == "Alex"  # trimmed
+    assert p.assistant_name == "Ada"
+    assert p.verbosity == "brief"
+    assert p.greeting() == "Hi Alex, I'm Ada."
+
+
+def test_personalize_blank_name_uses_defaults(manager):
+    w = SetupWizardController(manager)
+    w.set_value("personality", "user_name", "")
+    w.set_value("personality", "assistant_name", "")
+    w.finish()
+    p = manager.get().personality
+    assert p.user_name == ""
+    assert p.assistant_name == "MimOSA"  # default restored
+    assert p.greeting() == "Hi, I'm MimOSA."
+
+
+def test_personalize_invalid_verbosity_coerced(manager):
+    w = SetupWizardController(manager)
+    w.set_value("personality", "verbosity", "rambling")
+    assert w.get_value("personality", "verbosity") == "balanced"
