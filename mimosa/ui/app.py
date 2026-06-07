@@ -183,6 +183,44 @@ class MimOSAApplication:
         except Exception:  # pragma: no cover - wizard is best-effort
             logger.debug("Setup wizard could not run", exc_info=True)
 
+    def _warn_if_mic_unavailable(self, transient_for=None) -> None:
+        """Surface a warning if the configured microphone can't be found.
+
+        A user may have selected a specific mic that has since been unplugged or
+        renamed. We detect that here (the stored ``voice.input_device`` no longer
+        resolves to a live device) and show a non-blocking dialog plus a log
+        warning, pointing them at Settings. Best-effort and never fatal.
+        """
+        try:
+            from mimosa.voice.audio_manager import AudioManager
+
+            configured = (self.config_manager.get().voice.input_device or "").strip()
+            if not configured:
+                return  # using the system default; nothing to warn about
+            if AudioManager.resolve_device_index(configured) is not None:
+                return  # configured device is present
+
+            msg = (
+                f"The configured microphone ('{configured}') is unavailable. "
+                "MimOSA will use the system default. Open Settings to pick an "
+                "available microphone, or run 'mimosa --check-audio' to diagnose."
+            )
+            logger.warning(msg)
+            try:
+                import gi
+
+                gi.require_version("Gtk", "4.0")
+                from gi.repository import Gtk
+
+                dialog = Gtk.AlertDialog()
+                dialog.set_message("Microphone unavailable")
+                dialog.set_detail(msg)
+                dialog.show(transient_for)
+            except Exception:  # pragma: no cover - GTK/runtime dependent
+                logger.debug("Could not show mic-unavailable dialog", exc_info=True)
+        except Exception:  # pragma: no cover - defensive, never fatal
+            logger.debug("Microphone availability check failed", exc_info=True)
+
     def run_headless(self) -> int:
         """Run the voice loop directly with no GUI. Returns a process exit code."""
         logger.info("Starting MimOSA in headless mode (%s)", describe_environment())
@@ -233,6 +271,10 @@ class MimOSAApplication:
 
             # First-run setup wizard (M4.2), modal to the avatar.
             self._maybe_run_setup_wizard(transient_for=window)
+
+            # Warn if the configured microphone is no longer available so the
+            # user isn't left wondering why voice input is silent.
+            self._warn_if_mic_unavailable(transient_for=window)
 
             # Bridge voice states -> avatar (thread-safe via GLib.idle_add).
             # The handler also keeps the expression controller and tray icon in
@@ -509,6 +551,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Print GUI/voice environment readiness and exit.",
     )
     p.add_argument(
+        "--check-audio",
+        action="store_true",
+        help="Run microphone diagnostics: list input devices, show the "
+        "configured one, and record a short live-volume test, then exit.",
+    )
+    p.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -520,6 +568,98 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Log to the console only; do not write the rotating log file.",
     )
     return p
+
+
+def run_audio_diagnostics(seconds: float = 5.0) -> int:
+    """Diagnose microphone input and exit. Returns a process exit code.
+
+    Implements the ``--check-audio`` command:
+
+    1. Lists every available input device with its device index (and flags the
+       system default).
+    2. Shows which microphone is configured (resolving the stored
+       ``voice.input_device`` to a concrete index) and warns loudly if that
+       device is no longer available.
+    3. Runs a short recording test that prints a real-time volume meter so the
+       user can confirm the mic is actually capturing audio.
+    """
+    from mimosa.voice.audio_manager import AudioManager, AudioUnavailableError
+
+    print("MimOSA audio diagnostics")
+    print("=" * 48)
+
+    # 1) Enumerate input devices.
+    devices = AudioManager.list_input_devices()
+    default = AudioManager.get_default_input_device()
+    default_index = default.index if default is not None else None
+
+    if not devices:
+        print("\nNo input (microphone) devices were found.")
+        print("Check that a microphone is connected and that PyAudio + the")
+        print("PortAudio system library are installed.")
+        return 1
+
+    print(f"\nInput devices ({len(devices)} found):")
+    for d in devices:
+        marker = "  <- system default" if d.index == default_index else ""
+        print(f"  [{d.index}] {d.name}  ({d.max_input_channels} ch){marker}")
+
+    # 2) Show the configured microphone.
+    configured = ""
+    try:
+        from mimosa.utils.config import AppConfigManager
+
+        manager = AppConfigManager()
+        manager.load()
+        configured = manager.get().voice.input_device or ""
+    except Exception:  # pragma: no cover - config best-effort
+        configured = ""
+
+    print("\nConfigured microphone:")
+    if not configured:
+        if default_index is not None:
+            print(f"  (none set -> using system default) [{default_index}] {default.name}")
+        else:
+            print("  (none set -> using system default)")
+        resolved = default_index
+    else:
+        resolved = AudioManager.resolve_device_index(configured)
+        if resolved is None:
+            print(f"  '{configured}' is NOT available!")
+            print("  WARNING: the configured microphone is unavailable; falling")
+            print("           back to the system default. Open Settings to pick")
+            print("           an available device.")
+            resolved = default_index
+        else:
+            name = next((d.name for d in devices if d.index == resolved), "?")
+            print(f"  '{configured}' -> [{resolved}] {name}")
+
+    # 3) Live recording test with a real-time volume meter.
+    print(f"\nRecording test ({int(seconds)}s) -- please speak into the mic...")
+    mgr = AudioManager(device_index=resolved)
+
+    def _on_level(level: float) -> None:
+        bars = int(level * 40)
+        meter = "#" * bars + "-" * (40 - bars)
+        print(f"\r  [{meter}] {level * 100:5.1f}%", end="", flush=True)
+
+    try:
+        peak = mgr.measure_levels(seconds, _on_level)
+    except AudioUnavailableError as exc:
+        print(f"\n  Recording failed: {exc}")
+        return 1
+    except Exception as exc:  # pragma: no cover - backend dependent
+        print(f"\n  Recording failed: {exc}")
+        return 1
+
+    print()  # finish the meter line
+    print(f"\nPeak level: {peak * 100:.1f}%")
+    if peak < 0.01:
+        print("  WARNING: little or no signal detected. Check the mic connection,")
+        print("           OS input permissions, and that the right device is set.")
+    else:
+        print("  OK: the microphone is capturing audio.")
+    return 0
 
 
 def main(argv=None) -> int:
@@ -536,6 +676,9 @@ def main(argv=None) -> int:
         print("  " + describe_environment())
         print("  " + describe_log_location())
         return 0
+
+    if args.check_audio:
+        return run_audio_diagnostics()
 
     try:
         app = MimOSAApplication(force_headless=args.no_gui)
