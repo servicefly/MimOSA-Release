@@ -51,8 +51,8 @@ mimosa
 ```
 
 See **[INSTALL.md](INSTALL.md)** for the full guide and
-**[ISSUES_TO_ADDRESS.md](ISSUES_TO_ADDRESS.md)** for optional prerequisites
-(PortAudio, GTK4, API keys, first-run model downloads).
+**[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** for help with optional
+prerequisites (PortAudio, GTK4, API keys, first-run model downloads).
 
 ### Before promoting to a final 1.0.0
 

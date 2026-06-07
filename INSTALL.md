@@ -21,7 +21,7 @@ for the language model if you choose to enable it.
 ### Easiest: one-liner (fresh Ubuntu/Kubuntu)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/servicefly/MimOSA/develop/get-mimosa.sh | bash
+curl -fsSL https://raw.githubusercontent.com/servicefly/MimOSA-Release/main/get-mimosa.sh | bash
 ```
 
 This installs `git` if needed, clones MimOSA into `~/MimOSA`, and installs **all**
@@ -34,8 +34,8 @@ cd ~/MimOSA && source .venv/bin/activate && mimosa
 ### Bootstrap script (clone, then one command)
 
 ```bash
-git clone https://github.com/servicefly/MimOSA.git
-cd MimOSA
+git clone https://github.com/servicefly/MimOSA-Release.git
+cd MimOSA-Release
 ./bootstrap.sh        # apt-installs Python/PortAudio/GTK4, then runs install.sh
 ```
 
@@ -77,8 +77,8 @@ libraries (you can add them later):
 ## 2. Install (one command)
 
 ```bash
-git clone https://github.com/servicefly/MimOSA.git
-cd MimOSA
+git clone https://github.com/servicefly/MimOSA-Release.git
+cd MimOSA-Release
 ./install.sh
 ```
 
@@ -183,5 +183,5 @@ left untouched so you can reinstall later and pick up where you left off.
 - No account or API key is required for local operation. An Abacus.AI key is
   only needed if you opt into the cloud LLM.
 
-See the **[Issues to address before installation](ISSUES_TO_ADDRESS.md)** for a
-full checklist of optional prerequisites.
+See **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** if you hit any issues
+during or after installation.

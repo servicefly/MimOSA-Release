@@ -4,7 +4,7 @@
 #
 # Designed to be piped straight from the web:
 #
-#     curl -fsSL https://raw.githubusercontent.com/servicefly/MimOSA/develop/get-mimosa.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/servicefly/MimOSA-Release/main/get-mimosa.sh | bash
 #
 # It will:
 #     1. Make sure git is available (installing it via apt if needed).
@@ -13,8 +13,8 @@
 #
 # Environment overrides:
 #     MIMOSA_DIR     where to clone (default: $HOME/MimOSA)
-#     MIMOSA_BRANCH  branch to clone (default: develop)
-#     MIMOSA_REPO    git URL (default: https://github.com/servicefly/MimOSA.git)
+#     MIMOSA_BRANCH  branch to clone (default: main)
+#     MIMOSA_REPO    git URL (default: https://github.com/servicefly/MimOSA-Release.git)
 #     MIMOSA_BOOTSTRAP_ARGS  extra args passed to bootstrap.sh (e.g. "--core")
 #
 # Privacy note: MimOSA is local-first. This script downloads code from GitHub
@@ -22,8 +22,8 @@
 set -euo pipefail
 
 MIMOSA_DIR="${MIMOSA_DIR:-$HOME/MimOSA}"
-MIMOSA_BRANCH="${MIMOSA_BRANCH:-develop}"
-MIMOSA_REPO="${MIMOSA_REPO:-https://github.com/servicefly/MimOSA.git}"
+MIMOSA_BRANCH="${MIMOSA_BRANCH:-main}"
+MIMOSA_REPO="${MIMOSA_REPO:-https://github.com/servicefly/MimOSA-Release.git}"
 MIMOSA_BOOTSTRAP_ARGS="${MIMOSA_BOOTSTRAP_ARGS:-}"
 
 if [ -t 1 ]; then
