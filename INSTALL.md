@@ -9,6 +9,51 @@ for the language model if you choose to enable it.
 
 ---
 
+## 0. Choose an install method
+
+| Method | Best for | Installs system packages for you? |
+|--------|----------|:---------------------------------:|
+| **One-liner** (below) | Absolute beginners on Ubuntu/Kubuntu | ✅ yes |
+| **Bootstrap script** (`./bootstrap.sh`) | Beginners who cloned the repo | ✅ yes |
+| **`.deb` package** (`packaging/`) | System-wide install + menu launcher | ✅ yes |
+| **`./install.sh`** ([§2](#2-install-one-command)) | Advanced users managing their own deps | ❌ no |
+
+### Easiest: one-liner (fresh Ubuntu/Kubuntu)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/servicefly/MimOSA/develop/get-mimosa.sh | bash
+```
+
+This installs `git` if needed, clones MimOSA into `~/MimOSA`, and installs **all**
+system + Python dependencies. Then:
+
+```bash
+cd ~/MimOSA && source .venv/bin/activate && mimosa
+```
+
+### Bootstrap script (clone, then one command)
+
+```bash
+git clone https://github.com/servicefly/MimOSA.git
+cd MimOSA
+./bootstrap.sh        # apt-installs Python/PortAudio/GTK4, then runs install.sh
+```
+
+Flags: `--core` (skip voice + UI packages), `--no-voice`, `--no-ui`, `--yes`
+(no prompts).
+
+### `.deb` package (system-wide)
+
+```bash
+./packaging/build-deb.sh --install-build-deps
+sudo apt install ./packaging/dist/mimosa-assistant_*.deb
+```
+
+See **[packaging/README.md](packaging/README.md)** for full details. The rest of
+this guide covers the manual `install.sh` method for advanced users.
+
+---
+
 ## 1. What you need
 
 - **Linux desktop** — primary target is Kubuntu / Ubuntu 24.04+, but any modern

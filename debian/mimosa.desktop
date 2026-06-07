@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MimOSA
+GenericName=Voice Assistant
+Comment=Privacy-first, local-first voice assistant for Linux
+Exec=mimosa
+Icon=mimosa
+Terminal=false
+Categories=Utility;Accessibility;AudioVideo;
+Keywords=voice;assistant;ai;privacy;
+StartupNotify=false

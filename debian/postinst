@@ -1,0 +1,57 @@
+#!/bin/sh
+# postinst -- build the MimOSA virtual environment and install the "mimosa"
+# command. Runs after the package files are unpacked.
+set -e
+
+APP_DIR="/usr/share/mimosa-assistant"
+VENV_DIR="/opt/mimosa/venv"
+BIN_LINK="/usr/bin/mimosa"
+
+case "$1" in
+    configure)
+        echo "Setting up MimOSA virtual environment in /opt/mimosa ..."
+
+        # Pick the best available Python (>= 3.10).
+        PY=""
+        for cand in python3.12 python3.11 python3.10 python3; do
+            if command -v "$cand" >/dev/null 2>&1; then
+                if "$cand" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+                    PY="$cand"
+                    break
+                fi
+            fi
+        done
+        if [ -z "$PY" ]; then
+            echo "ERROR: No Python 3.10+ interpreter found. Install python3.11" >&2
+            echo "       and run: sudo dpkg-reconfigure mimosa-assistant" >&2
+            exit 1
+        fi
+
+        mkdir -p /opt/mimosa
+        if [ ! -d "$VENV_DIR" ]; then
+            "$PY" -m venv "$VENV_DIR"
+        fi
+
+        # Upgrade pip and install MimOSA (with voice + UI extras) from the
+        # shipped source tree. This step needs network access for PyPI.
+        "$VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 || true
+        if ! "$VENV_DIR/bin/python" -m pip install "$APP_DIR""[all]"; then
+            echo "WARNING: Full install (voice+UI extras) failed; trying core only." >&2
+            "$VENV_DIR/bin/python" -m pip install "$APP_DIR"
+        fi
+
+        # Expose the "mimosa" command system-wide.
+        ln -sf "$VENV_DIR/bin/mimosa" "$BIN_LINK"
+
+        echo "MimOSA installed. Run 'mimosa --check' then 'mimosa' to start."
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+exit 0

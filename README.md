@@ -98,10 +98,80 @@ abstraction layer and how local-LLM support plugs in.
 
 ## 🚀 Setup
 
-> **The fastest path:** see **[INSTALL.md](INSTALL.md)** for a dead-simple,
-> copy-paste install. The short version is below.
+Pick whichever method matches your comfort level. **New to Linux? Use the
+one-liner or the bootstrap script** — they install everything for you, including
+system packages. See **[INSTALL.md](INSTALL.md)** for the full guide.
 
-### Dead-simple install (recommended)
+| Method | Best for | Installs system packages? |
+|--------|----------|:-------------------------:|
+| **① One-liner** | Absolute beginners on Ubuntu/Kubuntu | ✅ yes (automatic) |
+| **② Bootstrap script** | Beginners who cloned the repo | ✅ yes (via `apt`) |
+| **③ `.deb` package** | System-wide install / menu launcher | ✅ yes (via `apt`) |
+| **④ `install.sh` (manual)** | Advanced users who manage their own deps | ❌ no |
+
+### ① Quick Start — one-liner (easiest)
+
+On a fresh **Ubuntu/Kubuntu** machine, paste this into a terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/servicefly/MimOSA/develop/get-mimosa.sh | bash
+```
+
+This installs `git` if needed, clones MimOSA into `~/MimOSA`, then installs
+**all** system and Python dependencies and sets up the `mimosa` command. When it
+finishes:
+
+```bash
+cd ~/MimOSA && source .venv/bin/activate
+mimosa            # first launch runs the "Get to Know MimOSA" wizard
+```
+
+> Prefer to read before you run? Download
+> [`get-mimosa.sh`](get-mimosa.sh), inspect it, then run it. To skip the
+> voice/UI system packages, use:
+> `curl -fsSL .../get-mimosa.sh | MIMOSA_BOOTSTRAP_ARGS=--core bash`
+
+### ② Bootstrap script (clone, then one command)
+
+If you've already cloned the repo, `bootstrap.sh` installs every system
+dependency via `apt` and then runs `install.sh` for you:
+
+```bash
+git clone https://github.com/servicefly/MimOSA.git
+cd MimOSA
+./bootstrap.sh            # installs Python, PortAudio, GTK4, etc. + MimOSA
+# variants:
+./bootstrap.sh --core     # skip the voice + GUI system packages
+./bootstrap.sh --no-voice # skip just the PortAudio (voice) packages
+./bootstrap.sh --yes      # don't prompt for confirmation
+```
+
+### ③ `.deb` package (system-wide install)
+
+Build a Debian/Ubuntu package that installs MimOSA into `/opt/mimosa`, adds the
+`mimosa` command, and creates an applications-menu launcher:
+
+```bash
+# Build (one-time tooling install with --install-build-deps):
+./packaging/build-deb.sh --install-build-deps
+
+# Install (apt resolves system dependencies automatically):
+sudo apt install ./packaging/dist/mimosa-assistant_*.deb
+```
+
+Uninstall with `sudo apt remove mimosa-assistant`. Full details in
+**[packaging/README.md](packaging/README.md)**.
+
+### ④ Manual install with `install.sh` (advanced)
+
+For users who manage their own system dependencies. First install the system
+libraries you need:
+
+```bash
+sudo apt install portaudio19-dev libgtk-4-1 gir1.2-gtk-4.0   # voice + UI
+```
+
+Then:
 
 ```bash
 git clone https://github.com/servicefly/MimOSA.git
@@ -118,7 +188,7 @@ MimOSA as a package (giving you a `mimosa` command), and prints exactly where
 your config, data, and **log files** live. To remove everything later, run
 `./uninstall.sh` (add `--purge` to also delete your data and config).
 
-Once installed:
+Once installed (methods ② and ④):
 
 ```bash
 source .venv/bin/activate

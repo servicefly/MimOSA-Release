@@ -1,0 +1,33 @@
+Source: mimosa-assistant
+Section: utils
+Priority: optional
+Maintainer: ServiceFly <info.markethiveapp@gmail.com>
+Build-Depends: debhelper-compat (= 13), python3 (>= 3.10)
+Standards-Version: 4.6.2
+Homepage: https://github.com/servicefly/MimOSA
+Rules-Requires-Root: no
+
+Package: mimosa-assistant
+Architecture: all
+Depends: ${misc:Depends},
+         python3 (>= 3.10),
+         python3-venv,
+         python3-pip,
+         libgtk-4-1,
+         gir1.2-gtk-4.0,
+         python3-gi,
+         python3-gi-cairo
+Recommends: portaudio19-dev,
+            libsndfile1,
+            ffmpeg
+Description: Privacy-first, local-first voice assistant for Linux
+ MimOSA (Mimicking OS Assistant) is a voice-controlled AI assistant that lives
+ in your operating system: it controls apps, finds files, manages system
+ settings, and conducts research through natural conversation.
+ .
+ MimOSA keeps private conversations on your machine, learns your preferences
+ over time, sends no telemetry, and can run its language model fully locally.
+ .
+ This package installs MimOSA into a self-contained virtual environment under
+ /opt/mimosa and provides the "mimosa" command. The on-device voice models
+ (Whisper, Piper) are downloaded on first use.

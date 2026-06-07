@@ -1,0 +1,28 @@
+#!/bin/sh
+# postrm -- clean up the virtual environment and command symlink.
+set -e
+
+VENV_PARENT="/opt/mimosa"
+BIN_LINK="/usr/bin/mimosa"
+
+case "$1" in
+    remove|purge)
+        # Remove the command symlink and the managed virtual environment.
+        [ -L "$BIN_LINK" ] && rm -f "$BIN_LINK" || true
+        [ -d "$VENV_PARENT" ] && rm -rf "$VENV_PARENT" || true
+
+        # On purge, also remove user data/config is NOT done here: those live in
+        # each user's home directory (~/.local/share/mimosa, ~/.config/mimosa)
+        # and are intentionally preserved. Users can remove them manually or via
+        # the project's uninstall.sh --purge.
+        ;;
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+exit 0

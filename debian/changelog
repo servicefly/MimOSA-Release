@@ -1,0 +1,7 @@
+mimosa-assistant (1.0.0~rc1-1) unstable; urgency=medium
+
+  * Initial Debian packaging for MimOSA 1.0.0 Release Candidate 1.
+  * Installs MimOSA into a self-contained virtual environment under
+    /opt/mimosa and provides the "mimosa" command system-wide.
+
+ -- ServiceFly <info.markethiveapp@gmail.com>  Sun, 07 Jun 2026 18:59:48 +0000

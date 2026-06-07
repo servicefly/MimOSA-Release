@@ -83,3 +83,19 @@ Thumbs.db
 !data/avatars/*.svg
 !data/avatars/*.png
 !data/avatars/README.md
+
+
+# --- Debian packaging build artifacts ---
+# Keep the debian/ source files, but ignore everything dpkg-buildpackage
+# generates during a build.
+debian/mimosa-assistant/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*.log
+debian/*.debhelper
+packaging/dist/
+*.deb
+*.buildinfo
+*.changes

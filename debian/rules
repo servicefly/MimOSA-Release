@@ -1,0 +1,39 @@
+#!/usr/bin/make -f
+# Debian rules for MimOSA.
+#
+# Strategy: ship the MimOSA source tree under /usr/share/mimosa-assistant and
+# let the postinst maintainer script build a self-contained virtual environment
+# in /opt/mimosa (pip-installing MimOSA + its dependencies). This keeps the
+# packaged Python deps (which are not all available as Debian packages) isolated
+# from the system Python.
+
+export DH_VERBOSE = 1
+
+SHAREDIR = debian/mimosa-assistant/usr/share/mimosa-assistant
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Nothing to compile; the venv is built at install time by postinst.
+
+override_dh_auto_test:
+	# Tests run from the dev environment, not during packaging.
+
+override_dh_auto_install:
+	mkdir -p $(SHAREDIR)
+	# Copy the application source and packaging metadata needed to pip-install.
+	cp -r mimosa $(SHAREDIR)/
+	cp pyproject.toml $(SHAREDIR)/
+	cp README.md $(SHAREDIR)/
+	cp LICENSE $(SHAREDIR)/ 2>/dev/null || true
+	cp requirements.txt $(SHAREDIR)/ 2>/dev/null || true
+	# Ship the .desktop launcher so MimOSA appears in the applications menu.
+	mkdir -p debian/mimosa-assistant/usr/share/applications
+	cp debian/mimosa.desktop debian/mimosa-assistant/usr/share/applications/
+
+override_dh_installsystemd:
+	# No system services.
+
+override_dh_auto_clean:
+	rm -rf debian/mimosa-assistant
