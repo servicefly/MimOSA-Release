@@ -123,14 +123,17 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "Choose how MimOSA listens. You can change all of this later in Settings.",
         fields=(
             FieldSpec("voice", "wake_word", "Wake word", "text",
-                      help="Phrase that activates listening.", restart=True),
+                      help="The phrase that wakes MimOSA up (e.g. 'hey mimosa'). "
+                           "MimOSA stays asleep until it hears this.", restart=True),
             FieldSpec("voice", "wake_word_sensitivity", "Wake-word sensitivity",
                       "float", minimum=MIN_WAKE_SENSITIVITY,
                       maximum=MAX_WAKE_SENSITIVITY, step=0.05,
-                      help="Higher = easier to trigger."),
+                      help="How eager MimOSA is to wake. Higher triggers more "
+                           "easily but risks false wake-ups; lower is stricter."),
             FieldSpec("voice", "stt_model", "Speech-to-text model", "choice",
                       choices=WHISPER_MODELS, restart=True,
-                      help="Larger models are more accurate but slower."),
+                      help="The model that turns your speech into text. Larger "
+                           "models hear more accurately but run slower on your PC."),
         ),
     )
     privacy = WizardStep(
@@ -156,13 +159,20 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "control by confirming anything destructive.",
         fields=(
             FieldSpec("system", "file_operations_enabled", "Allow file operations",
-                      "bool"),
+                      "bool",
+                      help="Lets MimOSA find, open, create and move files when you "
+                           "ask. Turn off to keep MimOSA away from your files entirely."),
             FieldSpec("system", "app_control_enabled", "Allow application control",
-                      "bool"),
+                      "bool",
+                      help="Lets MimOSA launch and close applications by voice "
+                           "(e.g. 'open Firefox'). Off means MimOSA won't start apps."),
             FieldSpec("system", "system_controls_enabled", "Allow system controls",
-                      "bool"),
+                      "bool",
+                      help="Lets MimOSA adjust volume, brightness, Wi-Fi and check "
+                           "battery. Off means it won't touch your system settings."),
             FieldSpec("system", "safe_mode", "Safe mode (recommended)", "bool",
-                      help="Confirm destructive & system actions."),
+                      help="Asks you to confirm before anything destructive (deleting "
+                           "files, changing system settings). Keeps you in control."),
         ),
     )
     finish = WizardStep(

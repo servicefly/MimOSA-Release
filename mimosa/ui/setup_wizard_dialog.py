@@ -240,8 +240,22 @@ if HAS_GTK:
 
         def _build_field(self, spec):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-            label = Gtk.Label(label=spec.label, xalign=0, hexpand=True)
+            label = Gtk.Label(label=spec.label, xalign=0)
             row.append(label)
+            # Info icon (ℹ️) with a hover tooltip explaining the option. The
+            # help text is authored on each FieldSpec; surfacing it here means
+            # newcomers can hover to learn what an option does and why.
+            if getattr(spec, "help", ""):
+                info = Gtk.Image.new_from_icon_name("help-about-symbolic")
+                info.set_tooltip_text(spec.help)
+                info.add_css_class("dim-label")
+                row.append(info)
+                # Also put the tooltip on the label/row so the whole line is
+                # discoverable, not just the small icon.
+                label.set_tooltip_text(spec.help)
+                row.set_tooltip_text(spec.help)
+            # Spacer pushes the editing widget to the right edge.
+            row.append(Gtk.Box(hexpand=True))
             value = self._controller.get_value(spec.section, spec.name)
             if spec.kind == "bool":
                 widget = Gtk.Switch(active=bool(value))
