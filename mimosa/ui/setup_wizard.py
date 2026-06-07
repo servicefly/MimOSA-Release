@@ -642,6 +642,90 @@ class SetupWizardController:
         logger.info("First-run setup wizard completed.")
         return self._manager.get()
 
+    def create_desktop_shortcut(self) -> bool:
+        """Create a desktop launcher for MimOSA in the user's ``~/Desktop``.
+
+        Looks for an installed ``mimosa.desktop`` entry (first in the user's
+        local applications dir, then the system one) and copies it onto the
+        Desktop.  If no installed entry is found a minimal launcher is
+        generated that relies on the ``mimosa`` command and themed icon being
+        on ``PATH``/in the icon theme (both provided by ``install.sh``).
+
+        The copied file is marked executable and, when the ``gio`` helper is
+        available, flagged as a *trusted* launcher so GNOME doesn't show the
+        "Untrusted application launcher" warning.
+
+        Returns ``True`` on success.  Never raises -- desktop integration is a
+        best-effort convenience and must not break the wizard.
+        """
+        import os
+        import shutil
+        import stat
+        import subprocess
+        from pathlib import Path
+
+        try:
+            home = Path.home()
+            # Resolve the Desktop directory (respect XDG user dirs when set).
+            desktop_dir = Path(
+                os.environ.get("XDG_DESKTOP_DIR", home / "Desktop")
+            )
+            desktop_dir.mkdir(parents=True, exist_ok=True)
+            target = desktop_dir / "mimosa.desktop"
+
+            xdg_data_home = Path(
+                os.environ.get("XDG_DATA_HOME", home / ".local" / "share")
+            )
+            candidates = [
+                xdg_data_home / "applications" / "mimosa.desktop",
+                Path("/usr/share/applications/mimosa.desktop"),
+                Path("/usr/local/share/applications/mimosa.desktop"),
+            ]
+            source = next((c for c in candidates if c.is_file()), None)
+
+            if source is not None:
+                shutil.copyfile(source, target)
+            else:
+                exec_cmd = shutil.which("mimosa") or "mimosa"
+                target.write_text(
+                    "[Desktop Entry]\n"
+                    "Type=Application\n"
+                    "Name=MimOSA\n"
+                    "Comment=Your voice-first AI companion\n"
+                    f"Exec={exec_cmd}\n"
+                    "Icon=mimosa\n"
+                    "Terminal=false\n"
+                    "Categories=Utility;Accessibility;AudioVideo;\n",
+                    encoding="utf-8",
+                )
+
+            # Make the launcher executable (required by most file managers).
+            mode = target.stat().st_mode
+            target.chmod(
+                mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            )
+
+            # Best-effort: mark the launcher trusted for GNOME/Nautilus.
+            gio = shutil.which("gio")
+            if gio:
+                try:
+                    subprocess.run(
+                        [gio, "set", str(target),
+                         "metadata::trusted", "true"],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    )
+                except Exception:  # pragma: no cover - purely cosmetic
+                    logger.debug("gio trust flag failed", exc_info=True)
+
+            logger.info("Created desktop shortcut at %s", target)
+            return True
+        except Exception:
+            logger.warning("Could not create desktop shortcut", exc_info=True)
+            return False
+
     def cancel(self, *, mark_complete: bool = True, persist: bool = True) -> None:
         """Abort the wizard, discarding working edits.
 

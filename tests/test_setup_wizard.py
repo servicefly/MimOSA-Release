@@ -469,3 +469,37 @@ def test_personalize_invalid_verbosity_coerced(manager):
     w = SetupWizardController(manager)
     w.set_value("personality", "verbosity", "rambling")
     assert w.get_value("personality", "verbosity") == "balanced"
+
+
+
+def test_create_desktop_shortcut(manager, tmp_path, monkeypatch):
+    # Redirect HOME + Desktop into a temp dir so we never touch the real one.
+    monkeypatch.setenv("XDG_DESKTOP_DIR", str(tmp_path / "Desktop"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    w = SetupWizardController(manager)
+    assert w.create_desktop_shortcut() is True
+    shortcut = tmp_path / "Desktop" / "mimosa.desktop"
+    assert shortcut.is_file()
+    content = shortcut.read_text()
+    assert "[Desktop Entry]" in content
+    assert "MimOSA" in content
+    # Must be executable for file managers to treat it as a launcher.
+    import os
+    assert os.access(shortcut, os.X_OK)
+
+
+def test_create_desktop_shortcut_prefers_installed_entry(
+    manager, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("XDG_DESKTOP_DIR", str(tmp_path / "Desktop"))
+    data_home = tmp_path / "data"
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    installed = data_home / "applications" / "mimosa.desktop"
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    installed.write_text("[Desktop Entry]\nName=MimOSA Installed\nExec=mimosa\n")
+    w = SetupWizardController(manager)
+    assert w.create_desktop_shortcut() is True
+    shortcut = tmp_path / "Desktop" / "mimosa.desktop"
+    assert "MimOSA Installed" in shortcut.read_text()

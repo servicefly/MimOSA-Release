@@ -20,6 +20,7 @@ from typing import Any, Callable, Optional
 
 from mimosa.ui.setup_wizard import (
     OLLAMA_INSTALL_URL,
+    STEP_FINISH,
     STEP_LLM,
     STEP_MICROPHONE,
     STEP_SPEAKER,
@@ -116,6 +117,11 @@ if HAS_GTK:
                 return
             if direction > 0 and self._controller.is_last:
                 self._controller.finish()
+                # Honour the optional "Create a desktop shortcut" checkbox
+                # shown on the final step.
+                check = getattr(self, "_desktop_shortcut_check", None)
+                if check is not None and check.get_active():
+                    self._controller.create_desktop_shortcut()
                 self._close(applied=True)
                 return
             if direction > 0:
@@ -144,6 +150,8 @@ if HAS_GTK:
                 self._fields_box.remove(child)
                 child = self._fields_box.get_first_child()
             self._widgets = []
+            # Reset per-step custom widgets so stale references don't linger.
+            self._desktop_shortcut_check = None
             # Default to an enabled Next button; the (required) LLM step may
             # disable it until a valid provider/key is chosen.
             self._next_btn.set_sensitive(True)
@@ -153,6 +161,8 @@ if HAS_GTK:
                 self._render_speaker()
             elif step.step_id == STEP_LLM:
                 self._render_llm()
+            elif step.step_id == STEP_FINISH:
+                self._render_finish()
             else:
                 for spec in step.fields:
                     row, widget = self._build_field(spec)
@@ -483,6 +493,25 @@ if HAS_GTK:
         def _flag_llm_incomplete(self) -> None:
             """Called when the user tries to advance without a valid choice."""
             self._update_llm_status()
+
+        # -- finish step (custom UI) ---------------------------------------
+
+        def _render_finish(self) -> None:
+            """Render the final step, offering to drop a desktop shortcut."""
+            # Keep any FieldSpec-driven fields the finish step may declare.
+            for spec in self._controller.current_step.fields:
+                row, widget = self._build_field(spec)
+                self._fields_box.append(row)
+                self._widgets.append((spec, widget))
+
+            check = Gtk.CheckButton(label="Create a desktop shortcut")
+            check.set_active(True)
+            check.set_tooltip_text(
+                "Place a MimOSA launcher on your desktop so you can start it "
+                "with a double-click."
+            )
+            self._desktop_shortcut_check = check
+            self._fields_box.append(check)
 
         def _build_field(self, spec):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
