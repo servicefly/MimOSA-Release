@@ -226,6 +226,7 @@ class MimOSAApplication:
                 on_toggle_pause=self._toggle_pause,
                 on_about=lambda: self._show_about(transient_for=window),
                 chat_open_provider=self._is_chat_open,
+                on_reset_position=lambda: window_manager.reset_position(),
             )
             self.window = window
             window_manager.apply_to_window(window)

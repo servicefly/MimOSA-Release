@@ -102,6 +102,7 @@ if HAS_GTK:
             on_toggle_pause: Optional[Callable[[], object]] = None,
             on_about: Optional[Callable[[], None]] = None,
             chat_open_provider: Optional[Callable[[], bool]] = None,
+            on_reset_position: Optional[Callable[[], object]] = None,
         ) -> None:
             super().__init__(application=application)
             self.config = config or UIConfig()
@@ -112,12 +113,16 @@ if HAS_GTK:
             self.on_toggle_pause = on_toggle_pause
             self.on_about = on_about
             self.chat_open_provider = chat_open_provider
+            self.on_reset_position = on_reset_position
 
             self.renderer = renderer or AvatarRenderer.from_config(self.config)
 
             self._anim_source = None
             self._last_frame_ns = None
             self._drag_start = (0, 0)
+            # Window top-left at the moment a drag begins; updated live so the
+            # circle follows the cursor on backends that allow client moves.
+            self._drag_origin = (int(self.config.pos_x or 0), int(self.config.pos_y or 0))
             # Tracks paused state so the context menu can show Pause vs Resume.
             self._paused = False
 
@@ -242,6 +247,7 @@ if HAS_GTK:
             self._add_action("openchat", self._action_open_chat)
             self._add_action("pause", self._action_toggle_pause)
             self._add_action("about", self._action_about)
+            self._add_action("resetposition", self._action_reset_position)
 
         def _build_menu_model(self):
             """Build a fresh menu model reflecting chat-open / paused state.
@@ -266,6 +272,7 @@ if HAS_GTK:
             model.append("Settings", "win.settings")
             pause_label = "Resume Listening" if self._paused else "Pause Listening"
             model.append(pause_label, "win.pause")
+            model.append("Reset Position", "win.resetposition")
             model.append("About MimOSA", "win.about")
             model.append("Quit", "win.quit")
             return model
@@ -378,25 +385,51 @@ if HAS_GTK:
 
         # -- event handlers -------------------------------------------------
 
-        def _on_drag_begin(self, gesture, start_x, start_y) -> None:
-            self._drag_start = (start_x, start_y)
+        def _move_window(self, x: int, y: int) -> bool:
+            """Best-effort move of this toplevel to absolute ``(x, y)``.
 
-        def _on_drag_update(self, gesture, offset_x, offset_y) -> None:
-            # Live window movement during drag is backend-specific in GTK4;
-            # we record the offset and commit on drag-end via on_move.
-            self._drag_offset = (offset_x, offset_y)
-
-        def _on_drag_end(self, gesture, offset_x, offset_y) -> None:
-            if self.on_move is None:
-                return
+            GTK4 has no portable client-side move; X11 backends expose it on the
+            surface. Returns ``True`` if the move was attempted on a capable
+            backend (Wayland compositors typically place windows themselves, in
+            which case we just persist the position for next launch).
+            """
             try:
                 surface = self.get_surface()
-                # Best-effort: report a new position derived from the offset.
-                base_x = self.config.pos_x or 0
-                base_y = self.config.pos_y or 0
-                new_x = int(base_x + offset_x)
-                new_y = int(base_y + offset_y)
-                self.on_move(new_x, new_y)
+                if surface is not None and hasattr(surface, "move"):
+                    surface.move(int(x), int(y))  # pragma: no cover - backend specific
+                    return True
+            except Exception as exc:  # pragma: no cover - backend dependent
+                logger.debug("Live window move failed: %s", exc)
+            return False
+
+        def _on_drag_begin(self, gesture, start_x, start_y) -> None:
+            self._drag_start = (start_x, start_y)
+            # Anchor the drag to the window's current top-left so each
+            # drag-update can compute an absolute target position.
+            self._drag_origin = (int(self.config.pos_x or 0), int(self.config.pos_y or 0))
+
+        def _on_drag_update(self, gesture, offset_x, offset_y) -> None:
+            # Move the window live so the circle visibly follows the cursor on
+            # backends that support client moves (X11). The final position is
+            # persisted on drag-end via on_move.
+            origin_x, origin_y = self._drag_origin
+            new_x = int(origin_x + offset_x)
+            new_y = int(origin_y + offset_y)
+            self._move_window(new_x, new_y)
+
+        def _on_drag_end(self, gesture, offset_x, offset_y) -> None:
+            try:
+                origin_x, origin_y = self._drag_origin
+                new_x = int(origin_x + offset_x)
+                new_y = int(origin_y + offset_y)
+                # Commit the move (also keeps it correct on Wayland for relaunch).
+                self._move_window(new_x, new_y)
+                # Keep our cached config + drag origin in sync.
+                self.config.pos_x = new_x
+                self.config.pos_y = new_y
+                self._drag_origin = (new_x, new_y)
+                if self.on_move is not None:
+                    self.on_move(new_x, new_y)
             except Exception as exc:  # pragma: no cover - backend dependent
                 logger.debug("Drag-end position commit failed: %s", exc)
 
@@ -470,6 +503,31 @@ if HAS_GTK:
         def _action_about(self, *args) -> None:
             if self.on_about is not None:
                 self.on_about()
+
+        def _action_reset_position(self, *args) -> None:
+            """Recenter the circle on its monitor and forget the saved position.
+
+            Delegates to ``on_reset_position`` (wired to the WindowManager) which
+            clears the persisted coordinates and returns the new centered
+            ``(x, y)`` so we can move the live window immediately. Falls back to a
+            local move if no callback is wired.
+            """
+            new_pos = None
+            if self.on_reset_position is not None:
+                try:
+                    new_pos = self.on_reset_position()
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug("Reset-position callback failed: %s", exc)
+                    new_pos = None
+            if new_pos is not None:
+                try:
+                    new_x, new_y = int(new_pos[0]), int(new_pos[1])
+                    self.config.pos_x = new_x
+                    self.config.pos_y = new_y
+                    self._drag_origin = (new_x, new_y)
+                    self._move_window(new_x, new_y)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug("Reset-position move failed: %s", exc)
 
 else:  # pragma: no cover - headless: no GTK to subclass
     AvatarWindow = None

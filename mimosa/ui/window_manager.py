@@ -153,6 +153,25 @@ class WindowManager:
             self.config.monitor = int(monitor_index)
         return self.config.save(self.config_path)
 
+    def reset_position(
+        self, monitors: Optional[List[MonitorInfo]] = None
+    ) -> Optional[Tuple[int, int]]:
+        """Forget the saved position and recenter on the preferred monitor.
+
+        Clears ``pos_x/pos_y`` (so a future launch centers by default), persists
+        the change, and returns the freshly centered ``(x, y)`` for the caller to
+        move the live window. Returns ``None`` if no monitor info is available
+        (the backend will place the window).
+        """
+        self.config.pos_x = None
+        self.config.pos_y = None
+        self.config.save(self.config_path)
+        mons = monitors if monitors is not None else self.query_monitors()
+        monitor = select_monitor(mons, self.config.monitor)
+        if monitor is None:
+            return None
+        return monitor.center(self.config.size)
+
     def startup_position(self, monitors: Optional[List[MonitorInfo]] = None):
         """Return the (x, y) to place the window at startup, or ``None``."""
         mons = monitors if monitors is not None else self.query_monitors()
