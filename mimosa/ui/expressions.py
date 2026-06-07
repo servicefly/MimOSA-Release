@@ -91,6 +91,7 @@ class Expression(enum.Enum):
             UIState.LISTENING: cls.LISTENING,
             UIState.PROCESSING: cls.THINKING,
             UIState.SPEAKING: cls.SPEAKING,
+            UIState.PAUSED: cls.SLEEPY,
             UIState.DISABLED: cls.SLEEPY,
         }
         return mapping.get(state, cls.NEUTRAL)

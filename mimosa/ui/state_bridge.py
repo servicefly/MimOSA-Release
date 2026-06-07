@@ -45,6 +45,7 @@ class UIState(enum.Enum):
     LISTENING = "listening"
     PROCESSING = "processing"
     SPEAKING = "speaking"
+    PAUSED = "paused"      # listening suspended by the user (mic muted)
     DISABLED = "disabled"  # loop stopped / not running
 
     @classmethod
@@ -63,6 +64,7 @@ class UIState(enum.Enum):
             "listening": cls.LISTENING,
             "processing": cls.PROCESSING,
             "speaking": cls.SPEAKING,
+            "paused": cls.PAUSED,
             "stopped": cls.DISABLED,
         }
         return mapping.get(value, cls.IDLE)

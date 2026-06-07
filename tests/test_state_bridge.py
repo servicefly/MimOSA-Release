@@ -47,6 +47,7 @@ class TestUIStateMapping:
             (VoiceState.PROCESSING, UIState.PROCESSING),
             (VoiceState.SPEAKING, UIState.SPEAKING),
             (VoiceState.STOPPED, UIState.DISABLED),
+            (VoiceState.PAUSED, UIState.PAUSED),
         ],
     )
     def test_from_voice_state_enum(self, voice, expected):
@@ -55,6 +56,11 @@ class TestUIStateMapping:
     def test_from_raw_string(self):
         assert UIState.from_voice_state("listening") == UIState.LISTENING
         assert UIState.from_voice_state("SPEAKING") == UIState.SPEAKING
+
+    def test_paused_state_mapping(self):
+        # Fix #4: paused listening maps to its own UI state.
+        assert UIState.from_voice_state("paused") == UIState.PAUSED
+        assert UIState.from_voice_state(VoiceState.PAUSED) == UIState.PAUSED
 
     def test_unknown_maps_to_idle(self):
         assert UIState.from_voice_state("wat") == UIState.IDLE

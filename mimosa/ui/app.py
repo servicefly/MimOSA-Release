@@ -222,6 +222,10 @@ class MimOSAApplication:
                 on_quit=lambda: (self.shutdown(), application.quit()),
                 on_settings=self._on_settings,
                 on_move=lambda x, y: window_manager.save_position(x, y),
+                on_open_chat=self._toggle_chat,
+                on_toggle_pause=self._toggle_pause,
+                on_about=lambda: self._show_about(transient_for=window),
+                chat_open_provider=self._is_chat_open,
             )
             self.window = window
             window_manager.apply_to_window(window)
@@ -283,7 +287,12 @@ class MimOSAApplication:
         return self._chat_controller
 
     def _open_chat(self) -> None:
-        """Open (or re-present) the optional text-chat window (M4.3)."""
+        """Open (or re-present) the optional text-chat window (M4.3).
+
+        The window instance is kept alive across hides so its size and position
+        are remembered when reopened. Closing it via the title-bar "X" hides it
+        rather than destroying it (see ``_install_chat_close_to_hide``).
+        """
         from mimosa.ui.chat_window import open_chat_window
 
         if self._chat_window is not None:
@@ -295,6 +304,82 @@ class MimOSAApplication:
         self._chat_window = open_chat_window(
             self._chat_controller_or_create(), transient_for=self.window
         )
+        self._install_chat_close_to_hide()
+
+    def _install_chat_close_to_hide(self) -> None:
+        """Make the chat window hide (not destroy) on close to keep position."""
+        if self._chat_window is None:
+            return
+        try:  # pragma: no cover - GTK-only path
+            def _on_close_request(win):
+                win.set_visible(False)
+                return True  # stop default destroy; preserve position/size
+
+            self._chat_window.connect("close-request", _on_close_request)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Could not install chat close-to-hide handler.")
+
+    def _is_chat_open(self) -> bool:
+        """Return True when the chat window exists and is currently visible."""
+        if self._chat_window is None:
+            return False
+        try:  # pragma: no cover - GTK-only path
+            return bool(self._chat_window.get_visible())
+        except Exception:  # pragma: no cover - defensive
+            return False
+
+    def _toggle_chat(self) -> None:
+        """Toggle the chat window: open/show if hidden, hide if visible.
+
+        This backs both the gear menu and the right-click menu so mic-less
+        users can drive MimOSA entirely from the chat window.
+        """
+        if self._is_chat_open():
+            try:  # pragma: no cover - GTK-only path
+                self._chat_window.set_visible(False)
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Hiding chat window failed.")
+            return
+        self._open_chat()
+
+    def _toggle_pause(self):
+        """Pause/resume wake-word listening; returns the new paused state.
+
+        Returning the authoritative state lets the avatar menu relabel itself
+        ("Pause Listening" <-> "Resume Listening") without guessing.
+        """
+        try:
+            return bool(self.voice_loop.toggle_pause())
+        except Exception:  # pragma: no cover - voice loop optional
+            logger.debug("Toggle pause failed; voice loop unavailable.")
+            return None
+
+    def _show_about(self, transient_for=None) -> None:
+        """Show a small About dialog with the MimOSA version (M4.3)."""
+        try:  # pragma: no cover - GTK-only path
+            import gi
+
+            gi.require_version("Gtk", "4.0")
+            from gi.repository import Gtk
+
+            try:
+                from mimosa import __version__ as version
+            except Exception:
+                version = "1.0.0-rc.1"
+
+            dialog = Gtk.AboutDialog()
+            if transient_for is not None:
+                dialog.set_transient_for(transient_for)
+            dialog.set_modal(True)
+            dialog.set_program_name("MimOSA")
+            dialog.set_version(str(version))
+            dialog.set_comments(
+                "A friendly, always-on-top voice assistant avatar."
+            )
+            dialog.set_license_type(Gtk.License.MIT_X11)
+            dialog.present()
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("About dialog could not be shown.", exc_info=True)
 
     def _build_system_tray(self, application=None) -> None:
         """Create the system-tray companion if a back-end is available (M4.3)."""

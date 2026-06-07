@@ -398,3 +398,46 @@ class TestVoiceLoop:
 
     def test_echo_handler_empty(self):
         assert "didn't catch" in vl.echo_response_handler("")
+
+    # -- pause / resume (Fix #4: accessibility for mic-less users) ---------
+
+    def test_initial_not_paused(self):
+        loop = vl.VoiceLoop(audio_manager=_FakeAudio())
+        assert loop.is_paused is False
+
+    def test_pause_sets_paused_state(self):
+        loop = vl.VoiceLoop(audio_manager=_FakeAudio())
+        assert loop.pause() is True
+        assert loop.is_paused is True
+        assert loop.state is vl.VoiceState.PAUSED
+
+    def test_resume_clears_paused_state(self):
+        loop = vl.VoiceLoop(audio_manager=_FakeAudio())
+        loop.pause()
+        assert loop.resume() is False
+        assert loop.is_paused is False
+        assert loop.state is vl.VoiceState.IDLE
+
+    def test_pause_is_idempotent(self):
+        loop = vl.VoiceLoop(audio_manager=_FakeAudio())
+        loop.pause()
+        # Second pause should keep it paused without error.
+        assert loop.pause() is True
+        assert loop.is_paused is True
+
+    def test_resume_when_not_paused_is_noop(self):
+        loop = vl.VoiceLoop(audio_manager=_FakeAudio())
+        assert loop.resume() is False
+        assert loop.is_paused is False
+
+    def test_toggle_pause_flips_state(self):
+        loop = vl.VoiceLoop(audio_manager=_FakeAudio())
+        assert loop.toggle_pause() is True   # now paused
+        assert loop.is_paused is True
+        assert loop.toggle_pause() is False  # now listening
+        assert loop.is_paused is False
+
+    def test_paused_state_is_distinct_value(self):
+        # PAUSED must be its own VoiceState so the UI can show a paused look.
+        assert vl.VoiceState.PAUSED.value == "paused"
+        assert vl.VoiceState.PAUSED is not vl.VoiceState.IDLE

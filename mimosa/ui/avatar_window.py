@@ -21,6 +21,7 @@ The window:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Callable, Optional
 
 from mimosa.ui.avatar_renderer import AvatarRenderer
@@ -28,6 +29,9 @@ from mimosa.ui.state_bridge import UIState
 from mimosa.ui.ui_config import UIConfig
 
 logger = logging.getLogger(__name__)
+
+#: Absolute path to the bundled gear icon used for the on-circle menu button.
+GEAR_ICON_PATH = os.path.join(os.path.dirname(__file__), "assets", "gear-icon.svg")
 
 try:  # GTK is required to *define* the widget class.
     import gi
@@ -43,6 +47,24 @@ except Exception:  # pragma: no cover - headless import path
 _CSS = b"""
 .mimosa-avatar, .mimosa-avatar window, window.mimosa-avatar {
     background-color: transparent;
+}
+/* On-circle gear/menu button: hidden until hover, then fades in smoothly. */
+.mimosa-gear {
+    opacity: 0;
+    transition: opacity 200ms ease-in-out;
+    background-color: rgba(0, 0, 0, 0.35);
+    border: none;
+    border-radius: 999px;
+    min-width: 24px;
+    min-height: 24px;
+    padding: 3px;
+    color: #ffffff;
+}
+.mimosa-gear.revealed {
+    opacity: 0.7;
+}
+.mimosa-gear:hover {
+    opacity: 1;
 }
 """
 
@@ -60,6 +82,12 @@ if HAS_GTK:
             on_quit: Callback invoked when the user picks "Quit".
             on_settings: Callback invoked when the user picks "Settings".
             on_move: Callback ``(x, y)`` invoked after a drag, for persistence.
+            on_open_chat: Callback invoked when the user picks "Open/Close Chat".
+            on_toggle_pause: Callback invoked to pause/resume listening. May
+                return the new paused state (truthy = paused) for label updates.
+            on_about: Callback invoked when the user picks "About MimOSA".
+            chat_open_provider: Optional ``() -> bool`` used to label the chat
+                menu item ("Open" vs "Close Chat").
         """
 
         def __init__(
@@ -70,18 +98,28 @@ if HAS_GTK:
             on_quit: Optional[Callable[[], None]] = None,
             on_settings: Optional[Callable[[], None]] = None,
             on_move: Optional[Callable[[int, int], None]] = None,
+            on_open_chat: Optional[Callable[[], None]] = None,
+            on_toggle_pause: Optional[Callable[[], object]] = None,
+            on_about: Optional[Callable[[], None]] = None,
+            chat_open_provider: Optional[Callable[[], bool]] = None,
         ) -> None:
             super().__init__(application=application)
             self.config = config or UIConfig()
             self.on_quit = on_quit
             self.on_settings = on_settings
             self.on_move = on_move
+            self.on_open_chat = on_open_chat
+            self.on_toggle_pause = on_toggle_pause
+            self.on_about = on_about
+            self.chat_open_provider = chat_open_provider
 
             self.renderer = renderer or AvatarRenderer.from_config(self.config)
 
             self._anim_source = None
             self._last_frame_ns = None
             self._drag_start = (0, 0)
+            # Tracks paused state so the context menu can show Pause vs Resume.
+            self._paused = False
 
             self._build_window()
             self._build_drawing_area()
@@ -115,7 +153,45 @@ if HAS_GTK:
             self.area.set_content_width(self.config.size)
             self.area.set_content_height(self.config.size)
             self.area.set_draw_func(self._on_draw)
-            self.set_child(self.area)
+
+            # Overlay the gear button on top of the avatar drawing area so it
+            # floats in the top-right corner of the circle.
+            self._overlay = Gtk.Overlay()
+            self._overlay.set_child(self.area)
+            self._build_gear_button()
+            if self._gear is not None:
+                self._overlay.add_overlay(self._gear)
+            self.set_child(self._overlay)
+
+        def _build_gear_button(self) -> None:
+            """Create the floating gear/menu button (top-right of the circle)."""
+            self._gear = None
+            try:
+                button = Gtk.Button()
+                button.add_css_class("mimosa-gear")
+                button.set_halign(Gtk.Align.END)
+                button.set_valign(Gtk.Align.START)
+                button.set_margin_top(10)
+                button.set_margin_end(10)
+                button.set_can_focus(False)
+                button.set_tooltip_text("MimOSA menu")
+                button.set_accessible_role(Gtk.AccessibleRole.BUTTON)
+                # Prefer the bundled SVG; fall back to a themed system icon.
+                image = None
+                try:
+                    if os.path.exists(GEAR_ICON_PATH):
+                        image = Gtk.Image.new_from_file(GEAR_ICON_PATH)
+                except Exception:  # pragma: no cover - backend dependent
+                    image = None
+                if image is None:
+                    image = Gtk.Image.new_from_icon_name("emblem-system-symbolic")
+                image.set_pixel_size(20)
+                button.set_child(image)
+                button.connect("clicked", self._on_gear_clicked)
+                self._gear = button
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Gear button could not be built: %s", exc)
+                self._gear = None
 
         def _install_gestures(self) -> None:
             # Drag to move.
@@ -136,21 +212,91 @@ if HAS_GTK:
             keys.connect("key-pressed", self._on_key)
             self.add_controller(keys)
 
+            # Hover over the avatar -> reveal the gear button (CSS fades it in).
+            motion = Gtk.EventControllerMotion()
+            motion.connect("enter", self._on_pointer_enter)
+            motion.connect("leave", self._on_pointer_leave)
+            self._overlay.add_controller(motion)
+
+        def _on_pointer_enter(self, controller, x, y) -> None:
+            if self._gear is not None:
+                self._gear.add_css_class("revealed")
+
+        def _on_pointer_leave(self, controller) -> None:
+            if self._gear is not None:
+                self._gear.remove_css_class("revealed")
+
         def _install_menu(self) -> None:
+            # The popover is parented on the overlay so it can anchor to either
+            # the cursor (right-click) or the gear button (left-click). The
+            # menu *model* is rebuilt on every popup so its labels reflect the
+            # current chat-open / paused state.
             menu = Gtk.PopoverMenu()
             self._menu = menu
-            menu.set_parent(self.area)
-            from gi.repository import Gio
-
-            model = Gio.Menu()
-            model.append("Settings", "win.settings")
-            model.append("Hide", "win.hide")
-            model.append("Quit", "win.quit")
-            menu.set_menu_model(model)
+            menu.set_parent(self._overlay)
+            menu.set_has_arrow(True)
 
             self._add_action("settings", self._action_settings)
             self._add_action("hide", lambda *a: self.set_visible(False))
             self._add_action("quit", self._action_quit)
+            self._add_action("openchat", self._action_open_chat)
+            self._add_action("pause", self._action_toggle_pause)
+            self._add_action("about", self._action_about)
+
+        def _build_menu_model(self):
+            """Build a fresh menu model reflecting chat-open / paused state.
+
+            Rebuilding each time keeps labels in sync ("Open Chat Window" vs
+            "Close Chat Window", "Pause Listening" vs "Resume Listening") which
+            matters for the mic-less, chat-driven accessibility workflow.
+            """
+            from gi.repository import Gio
+
+            # Determine the live chat-open state (best-effort).
+            chat_open = False
+            if self.chat_open_provider is not None:
+                try:
+                    chat_open = bool(self.chat_open_provider())
+                except Exception:  # pragma: no cover - defensive
+                    chat_open = False
+
+            model = Gio.Menu()
+            chat_label = "Close Chat Window" if chat_open else "Open Chat Window"
+            model.append(chat_label, "win.openchat")
+            model.append("Settings", "win.settings")
+            pause_label = "Resume Listening" if self._paused else "Pause Listening"
+            model.append(pause_label, "win.pause")
+            model.append("About MimOSA", "win.about")
+            model.append("Quit", "win.quit")
+            return model
+
+        def _show_menu(self, x: Optional[float] = None, y: Optional[float] = None) -> None:
+            """Pop up the context menu, anchored at ``(x, y)`` or the gear button.
+
+            GTK automatically constrains popovers to stay on-screen (including
+            on multi-monitor setups), so we only need to provide a sensible
+            anchor rectangle.
+            """
+            try:
+                # Refresh labels to reflect current state.
+                self._menu.set_menu_model(self._build_menu_model())
+                if x is not None and y is not None:
+                    rect = Gdk.Rectangle()
+                    rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+                    self._menu.set_pointing_to(rect)
+                elif self._gear is not None:
+                    # Anchor under the gear button (top-right of the circle).
+                    alloc = self._gear.get_allocation()
+                    rect = Gdk.Rectangle()
+                    rect.x, rect.y = alloc.x, alloc.y
+                    rect.width, rect.height = alloc.width, alloc.height
+                    self._menu.set_pointing_to(rect)
+                self._menu.popup()
+            except Exception as exc:  # pragma: no cover - backend dependent
+                logger.debug("Context menu popup failed: %s", exc)
+
+        def _on_gear_clicked(self, button) -> None:
+            self._show_menu()
 
         def _add_action(self, name: str, cb) -> None:
             from gi.repository import Gio
@@ -209,6 +355,15 @@ if HAS_GTK:
 
         def set_state(self, ui_state) -> None:
             """Update the avatar's visual state (safe to call from the main thread)."""
+            # Keep the paused flag in sync so the menu shows the right label
+            # even if pause/resume is triggered from outside the menu.
+            try:
+                if ui_state is UIState.PAUSED:
+                    self._paused = True
+                elif ui_state in (UIState.IDLE, UIState.LISTENING):
+                    self._paused = False
+            except Exception:  # pragma: no cover - defensive
+                pass
             self.renderer.set_state(ui_state)
             self.area.queue_draw()
 
@@ -246,13 +401,8 @@ if HAS_GTK:
                 logger.debug("Drag-end position commit failed: %s", exc)
 
         def _on_right_click(self, gesture, n_press, x, y) -> None:
-            try:
-                rect = Gdk.Rectangle()
-                rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-                self._menu.set_pointing_to(rect)
-                self._menu.popup()
-            except Exception as exc:  # pragma: no cover - backend dependent
-                logger.debug("Context menu popup failed: %s", exc)
+            # Anchor the menu at the cursor; GTK keeps it on-screen.
+            self._show_menu(x, y)
 
         def _on_key(self, controller, keyval, keycode, state) -> bool:
             if keyval == Gdk.KEY_Escape:
@@ -299,6 +449,27 @@ if HAS_GTK:
                 self.on_quit()
             else:
                 self.close()
+
+        def _action_open_chat(self, *args) -> None:
+            if self.on_open_chat is not None:
+                self.on_open_chat()
+
+        def _action_toggle_pause(self, *args) -> None:
+            if self.on_toggle_pause is None:
+                # No backend wired; still flip our local label state.
+                self._paused = not self._paused
+                return
+            result = self.on_toggle_pause()
+            # Prefer the authoritative paused state returned by the callback;
+            # fall back to a local toggle if it returns None.
+            if result is None:
+                self._paused = not self._paused
+            else:
+                self._paused = bool(result)
+
+        def _action_about(self, *args) -> None:
+            if self.on_about is not None:
+                self.on_about()
 
 else:  # pragma: no cover - headless: no GTK to subclass
     AvatarWindow = None

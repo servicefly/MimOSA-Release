@@ -356,7 +356,7 @@ class AvatarRenderer:
             self._draw_thinking(cr, cx, cy, radius, accent, cairo)
         elif state is UIState.SPEAKING:
             self._draw_speaking(cr, cx, cy, radius, accent, cairo)
-        elif state is UIState.DISABLED:
+        elif state in (UIState.DISABLED, UIState.PAUSED):
             self._draw_core(cr, cx, cy, radius * 0.5, (0.5, 0.5, 0.52), 0.5, cairo)
         else:  # IDLE
             self._draw_core(cr, cx, cy, radius * 0.55, accent, 0.85, cairo)

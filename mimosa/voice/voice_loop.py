@@ -40,6 +40,7 @@ from __future__ import annotations
 import enum
 import logging
 import os
+import time
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class VoiceState(enum.Enum):
     LISTENING = "listening"  # recording the user's utterance
     PROCESSING = "processing"  # transcribing + generating a response
     SPEAKING = "speaking"    # playing the synthesized reply
+    PAUSED = "paused"        # listening temporarily suspended by the user
     STOPPED = "stopped"      # loop has been shut down
 
 
@@ -133,6 +135,7 @@ class VoiceLoop:
 
         self._state = VoiceState.IDLE
         self._stop_requested = False
+        self._paused = False
         self._state_listeners: list = []
 
     # -- state -------------------------------------------------------------
@@ -273,6 +276,36 @@ class VoiceLoop:
         logger.info("Voice loop stop requested.")
         self._stop_requested = True
 
+    @property
+    def is_paused(self) -> bool:
+        """Whether listening is currently paused (wake word ignored)."""
+        return self._paused
+
+    def pause(self) -> bool:
+        """Suspend listening: the loop ignores the wake word until resumed.
+
+        Useful for accessibility (e.g. users driving MimOSA entirely from the
+        chat window) and for muting the mic without quitting. Safe to call from
+        the GTK main thread or any other thread. Returns the new paused state.
+        """
+        if not self._paused:
+            logger.info("Voice loop paused (listening suspended).")
+            self._paused = True
+            self._set_state(VoiceState.PAUSED)
+        return self._paused
+
+    def resume(self) -> bool:
+        """Resume listening after a :meth:`pause`. Returns the new paused state."""
+        if self._paused:
+            logger.info("Voice loop resumed (listening active).")
+            self._paused = False
+            self._set_state(VoiceState.IDLE)
+        return self._paused
+
+    def toggle_pause(self) -> bool:
+        """Flip between paused and listening. Returns the new paused state."""
+        return self.resume() if self._paused else self.pause()
+
     # -- core turn ---------------------------------------------------------
 
     def run_once(self, wait_for_wake: bool = True) -> Optional[str]:
@@ -375,6 +408,11 @@ class VoiceLoop:
         logger.info("Voice loop starting. Say the wake word to begin.")
         try:
             while not self._stop_requested:
+                # When paused, idle quietly without touching the microphone so
+                # the user can drive MimOSA from the chat window instead.
+                if self._paused:
+                    time.sleep(0.15)
+                    continue
                 try:
                     self.run_once(wait_for_wake=True)
                 except KeyboardInterrupt:
@@ -402,7 +440,7 @@ class VoiceLoop:
             self.wake.listen(
                 self.audio,
                 on_detected=_on_detected,
-                should_stop=lambda: self._stop_requested or detected["hit"],
+                should_stop=lambda: self._stop_requested or self._paused or detected["hit"],
             )
         except Exception as exc:
             logger.error("Wake-word listening failed: %s", exc)
