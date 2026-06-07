@@ -112,8 +112,12 @@ class VoiceLoop:
         max_record_seconds: float = 15.0,
         error_reporter=None,
         personality=None,
+        input_device_index: Optional[int] = None,
     ) -> None:
         self._audio = audio_manager
+        # Preferred microphone (PyAudio input-device index), chosen in the setup
+        # wizard / Settings. ``None`` means "use the system default device".
+        self._input_device_index = input_device_index
         self._wake = wake_word_detector
         self._stt = stt
         self._tts = tts
@@ -175,7 +179,7 @@ class VoiceLoop:
         if self._audio is None:
             from mimosa.voice.audio_manager import AudioManager
 
-            self._audio = AudioManager()
+            self._audio = AudioManager(device_index=self._input_device_index)
         return self._audio
 
     @property

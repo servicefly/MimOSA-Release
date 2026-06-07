@@ -33,7 +33,7 @@ import logging
 import wave
 from dataclasses import dataclass
 from io import BytesIO
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -112,17 +112,30 @@ class AudioManager:
         output_device: Optional[int] = None,
         silence_threshold: int = 500,
         silence_duration: float = 1.5,
+        device_index: Optional[int] = None,
     ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
         self.chunk_size = chunk_size
-        self.input_device = input_device
+        # ``device_index`` is the preferred, explicit name for the input device
+        # selected by the user (e.g. via the setup wizard). It takes precedence
+        # over the legacy ``input_device`` argument when both are given.
+        self.input_device = device_index if device_index is not None else input_device
         self.output_device = output_device
         self.silence_threshold = silence_threshold
         self.silence_duration = silence_duration
 
         self._pyaudio = None  # lazily created PyAudio instance
         self._format = None  # pyaudio.paInt16, set when backend loads
+
+    @property
+    def device_index(self) -> Optional[int]:
+        """The selected input-device index (alias for :attr:`input_device`)."""
+        return self.input_device
+
+    @device_index.setter
+    def device_index(self, value: Optional[int]) -> None:
+        self.input_device = value
 
     # -- backend management ------------------------------------------------
 
@@ -199,13 +212,127 @@ class AudioManager:
             )
         return devices
 
-    def list_input_devices(self) -> List[AudioDevice]:
-        """Return only devices capable of audio capture."""
-        return [d for d in self.list_devices() if d.is_input]
+    @staticmethod
+    def _enumerate_devices(default_sample_rate: int = 16000) -> List[AudioDevice]:
+        """Enumerate every device using a throw-away PyAudio instance.
 
-    def list_output_devices(self) -> List[AudioDevice]:
-        """Return only devices capable of audio playback."""
-        return [d for d in self.list_devices() if d.is_output]
+        Used by the static helpers so callers (e.g. the setup wizard) can list
+        devices without constructing/owning an :class:`AudioManager`. Never
+        raises -- returns ``[]`` when the audio backend is unavailable.
+        """
+        try:
+            import pyaudio  # imported lazily; optional dependency
+        except Exception:
+            logger.warning("PyAudio unavailable; cannot enumerate audio devices.")
+            return []
+        pa = None
+        try:
+            pa = pyaudio.PyAudio()
+        except Exception as exc:  # pragma: no cover - backend dependent
+            logger.warning("Could not initialise audio backend: %s", exc)
+            return []
+        devices: List[AudioDevice] = []
+        try:
+            for i in range(pa.get_device_count()):
+                try:
+                    info = pa.get_device_info_by_index(i)
+                except Exception:  # pragma: no cover - backend quirk
+                    continue
+                devices.append(
+                    AudioDevice(
+                        index=i,
+                        name=str(info.get("name", f"device {i}")),
+                        max_input_channels=int(info.get("maxInputChannels", 0)),
+                        max_output_channels=int(info.get("maxOutputChannels", 0)),
+                        default_sample_rate=int(
+                            info.get("defaultSampleRate", default_sample_rate)
+                        ),
+                    )
+                )
+        finally:
+            try:
+                pa.terminate()
+            except Exception:  # pragma: no cover - defensive
+                pass
+        return devices
+
+    @staticmethod
+    def list_input_devices() -> List[AudioDevice]:
+        """Return all devices capable of audio capture (system-wide).
+
+        A :func:`staticmethod` so the setup wizard can scan microphones without
+        owning an :class:`AudioManager`. Returns ``[]`` when no audio backend is
+        available (headless / CI).
+        """
+        return [d for d in AudioManager._enumerate_devices() if d.is_input]
+
+    @staticmethod
+    def list_output_devices() -> List[AudioDevice]:
+        """Return all devices capable of audio playback (system-wide)."""
+        return [d for d in AudioManager._enumerate_devices() if d.is_output]
+
+    @staticmethod
+    def get_default_input_device() -> Optional[AudioDevice]:
+        """Return the system default input device, or ``None`` if unavailable.
+
+        Mirrors PortAudio's notion of the default capture device so the wizard
+        can pre-select and label it ``(Default)``.
+        """
+        try:
+            import pyaudio  # imported lazily; optional dependency
+        except Exception:
+            return None
+        pa = None
+        try:
+            pa = pyaudio.PyAudio()
+            info = pa.get_default_input_device_info()
+            return AudioDevice(
+                index=int(info.get("index", 0)),
+                name=str(info.get("name", "default")),
+                max_input_channels=int(info.get("maxInputChannels", 0)),
+                max_output_channels=int(info.get("maxOutputChannels", 0)),
+                default_sample_rate=int(info.get("defaultSampleRate", 16000)),
+            )
+        except Exception:  # no default device, or backend missing
+            return None
+        finally:
+            if pa is not None:
+                try:
+                    pa.terminate()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
+    @staticmethod
+    def resolve_device_index(value) -> Optional[int]:
+        """Resolve a stored config value to a concrete input-device index.
+
+        Accepts ``None``/``""`` (→ system default, returns ``None``), an int or
+        numeric string (→ that index, if it exists), or a device *name* (→ the
+        index of the first input device whose name matches). Returns ``None``
+        when the value can't be resolved, so callers fall back to the default.
+        """
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        inputs = AudioManager.list_input_devices()
+        valid = {d.index for d in inputs}
+        # Numeric index (e.g. "3" or 3).
+        try:
+            idx = int(text)
+            return idx if idx in valid else (idx if not inputs else None)
+        except (TypeError, ValueError):
+            pass
+        # Name match (case-insensitive, exact then substring).
+        lowered = text.lower()
+        for d in inputs:
+            if d.name.lower() == lowered:
+                return d.index
+        for d in inputs:
+            if lowered in d.name.lower():
+                return d.index
+        return None
 
     # -- recording ---------------------------------------------------------
 
@@ -299,6 +426,53 @@ class AudioManager:
             stream.stop_stream()
             stream.close()
         return b"".join(frames)
+
+    # -- microphone test ---------------------------------------------------
+
+    def measure_levels(
+        self,
+        seconds: float = 2.0,
+        on_level: Optional["Callable[[float], None]"] = None,
+    ) -> float:
+        """Record for ``seconds`` and report normalised volume levels.
+
+        Used by the setup wizard's "Test Microphone" button to drive a live
+        volume meter. Reads audio in chunks from the *selected* input device
+        (``self.input_device``), computing each chunk's RMS amplitude
+        normalised to ``[0, 1]`` (relative to full-scale 16-bit). For every
+        chunk it invokes ``on_level(level)`` (if given) so the UI can animate a
+        meter, and finally returns the **peak** level observed.
+
+        Raises:
+            AudioUnavailableError: If no input device is available.
+        """
+        pa = self._ensure_backend()
+        stream = pa.open(
+            format=self._format,
+            channels=self.channels,
+            rate=self.sample_rate,
+            input=True,
+            frames_per_buffer=self.chunk_size,
+            input_device_index=self.input_device,
+        )
+        peak = 0.0
+        chunk_seconds = self.chunk_size / self.sample_rate
+        elapsed = 0.0
+        try:
+            while elapsed < seconds:
+                chunk = stream.read(self.chunk_size, exception_on_overflow=False)
+                elapsed += chunk_seconds
+                level = min(1.0, self.rms(chunk) / 32767.0)
+                peak = max(peak, level)
+                if on_level is not None:
+                    try:
+                        on_level(level)
+                    except Exception:  # pragma: no cover - UI callback best-effort
+                        logger.debug("level callback failed", exc_info=True)
+        finally:
+            stream.stop_stream()
+            stream.close()
+        return peak
 
     # -- playback ----------------------------------------------------------
 

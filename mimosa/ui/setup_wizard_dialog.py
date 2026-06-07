@@ -15,9 +15,14 @@ the wizard complete) when GTK is unavailable.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable, Optional
 
-from mimosa.ui.setup_wizard import SetupWizardController, WizardStep
+from mimosa.ui.setup_wizard import (
+    STEP_MICROPHONE,
+    SetupWizardController,
+    WizardStep,
+)
 from mimosa.utils.config import AppConfigManager
 
 logger = logging.getLogger(__name__)
@@ -26,7 +31,7 @@ try:  # GTK is required to *define* the widget class.
     import gi
 
     gi.require_version("Gtk", "4.0")
-    from gi.repository import Gtk
+    from gi.repository import GLib, Gtk
 
     HAS_GTK = True
 except Exception:  # pragma: no cover - headless import path
@@ -129,12 +134,109 @@ if HAS_GTK:
                 self._fields_box.remove(child)
                 child = self._fields_box.get_first_child()
             self._widgets = []
-            for spec in step.fields:
-                row, widget = self._build_field(spec)
-                self._fields_box.append(row)
-                self._widgets.append((spec, widget))
+            if step.step_id == STEP_MICROPHONE:
+                self._render_microphone()
+            else:
+                for spec in step.fields:
+                    row, widget = self._build_field(spec)
+                    self._fields_box.append(row)
+                    self._widgets.append((spec, widget))
             self._back_btn.set_sensitive(not self._controller.is_first)
             self._next_btn.set_label("Finish" if self._controller.is_last else "Next")
+
+        # -- microphone step (custom UI) -----------------------------------
+
+        def _render_microphone(self) -> None:
+            """Build the device dropdown, Test button, volume meter & status."""
+            self._mic_testing = False
+            self._mic_choices = self._controller.available_microphones()
+
+            # Device dropdown.
+            picker = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            picker.append(Gtk.Label(label="Microphone", xalign=0, hexpand=True))
+            self._mic_dropdown = Gtk.DropDown.new_from_strings(
+                [c.label for c in self._mic_choices]
+            )
+            # Pre-select the device already chosen (or the flagged default).
+            selected_index = self._controller.get_selected_microphone()
+            preselect = 0
+            for i, c in enumerate(self._mic_choices):
+                if c.index == selected_index and selected_index is not None:
+                    preselect = i
+                    break
+                if selected_index is None and c.is_default:
+                    preselect = i
+            self._mic_dropdown.set_selected(preselect)
+            self._mic_dropdown.connect("notify::selected", self._on_mic_selected)
+            picker.append(self._mic_dropdown)
+            self._fields_box.append(picker)
+            # Commit the pre-selected device immediately.
+            self._on_mic_selected(self._mic_dropdown, None)
+
+            # Test button.
+            self._mic_test_btn = Gtk.Button(label="Test Microphone")
+            self._mic_test_btn.connect("clicked", self._on_test_microphone)
+            self._fields_box.append(self._mic_test_btn)
+
+            # Volume meter.
+            self._mic_meter = Gtk.ProgressBar(show_text=False)
+            self._mic_meter.set_fraction(0.0)
+            self._fields_box.append(self._mic_meter)
+
+            # Status label.
+            self._mic_status = Gtk.Label(
+                label="Select your microphone, then click \u201cTest Microphone\u201d.",
+                xalign=0, wrap=True,
+            )
+            self._fields_box.append(self._mic_status)
+
+        def _on_mic_selected(self, dropdown, _pspec) -> None:
+            idx = dropdown.get_selected()
+            if 0 <= idx < len(self._mic_choices):
+                self._controller.set_microphone(self._mic_choices[idx].index)
+
+        def _on_test_microphone(self, _button) -> None:
+            if getattr(self, "_mic_testing", False):
+                return
+            self._mic_testing = True
+            self._mic_test_btn.set_sensitive(False)
+            self._mic_test_btn.set_label("Listening… speak now")
+            self._mic_meter.set_fraction(0.0)
+            self._mic_status.set_text("Listening for 2 seconds — say something!")
+
+            def _level(level: float) -> None:
+                GLib.idle_add(self._mic_meter.set_fraction, min(1.0, max(0.0, level)))
+
+            def _worker() -> None:
+                peak = self._controller.test_microphone(seconds=2.0, on_level=_level)
+                GLib.idle_add(self._finish_mic_test, peak)
+
+            threading.Thread(target=_worker, name="mimosa-mic-test",
+                             daemon=True).start()
+
+        def _finish_mic_test(self, peak: Optional[float]) -> bool:
+            self._mic_testing = False
+            self._mic_test_btn.set_sensitive(True)
+            self._mic_test_btn.set_label("Test Microphone")
+            if peak is None:
+                self._mic_meter.set_fraction(0.0)
+                self._mic_status.set_text(
+                    "Couldn't access that microphone. Try a different device, or "
+                    "continue — you can change this later in Settings."
+                )
+            elif peak < 0.02:
+                self._mic_meter.set_fraction(0.0)
+                self._mic_status.set_text(
+                    "Didn't hear much. Check the mic is unmuted and try again, or "
+                    "pick another device."
+                )
+            else:
+                self._mic_meter.set_fraction(min(1.0, peak))
+                self._mic_status.set_text(
+                    f"Looks good! Peak level {int(peak * 100)}%. This microphone "
+                    "is working."
+                )
+            return False  # one-shot idle callback
 
         def _build_field(self, spec):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)

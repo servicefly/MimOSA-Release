@@ -101,11 +101,19 @@ class MimOSAApplication:
     def voice_loop(self):
         """The voice loop, constructed on first use."""
         if self._voice_loop is None:
+            from mimosa.voice.audio_manager import AudioManager
             from mimosa.voice.voice_loop import VoiceLoop
+
+            # Resolve the user's chosen microphone (set in the setup wizard /
+            # Settings) to a concrete PyAudio device index so the voice loop
+            # listens with the right device instead of the system default.
+            voice_cfg = self.config_manager.get().voice
+            device_index = AudioManager.resolve_device_index(voice_cfg.input_device)
 
             self._voice_loop = VoiceLoop(
                 error_reporter=self.services.error_reporter,
                 personality=self.config_manager.get().personality,
+                input_device_index=device_index,
             )
         return self._voice_loop
 

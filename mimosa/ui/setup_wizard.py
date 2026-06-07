@@ -36,11 +36,32 @@ logger = logging.getLogger(__name__)
 
 # -- step identifiers (stable; used by the view & tests) --------------------
 STEP_WELCOME = "welcome"
+STEP_MICROPHONE = "microphone"
 STEP_PERSONALIZE = "personalize"
 STEP_VOICE = "voice"
 STEP_PRIVACY = "privacy"
 STEP_SYSTEM = "system"
 STEP_FINISH = "finish"
+
+
+@dataclass(frozen=True)
+class MicrophoneChoice:
+    """A selectable microphone for the wizard's device dropdown.
+
+    Attributes:
+        index: PyAudio device index (``None`` means "system default").
+        name: Human-readable device name.
+        is_default: Whether this is the system default input device.
+    """
+
+    index: Optional[int]
+    name: str
+    is_default: bool = False
+
+    @property
+    def label(self) -> str:
+        """Dropdown label, suffixed with ``(Default)`` for the default device."""
+        return f"{self.name} (Default)" if self.is_default else self.name
 
 
 @dataclass(frozen=True)
@@ -60,6 +81,16 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "Welcome to MimOSA",
         "MimOSA is your private, local-first voice assistant. This quick setup "
         "tunes a few preferences. Nothing you enter ever leaves your device.",
+        fields=(),
+    )
+    microphone = WizardStep(
+        STEP_MICROPHONE,
+        "Choose Your Microphone",
+        "Pick the microphone MimOSA should listen with. If you're not sure, "
+        "leave it on the system default. Use \"Test Microphone\" and speak — the "
+        "meter should move. You can change this later in Settings.",
+        # Rendered with a custom dropdown + test meter by the dialog, so no
+        # declarative fields here.
         fields=(),
     )
     personalize = WizardStep(
@@ -141,7 +172,7 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "Open Settings anytime to fine-tune things.",
         fields=(),
     )
-    return (welcome, personalize, voice, privacy, system, finish)
+    return (welcome, microphone, personalize, voice, privacy, system, finish)
 
 
 class SetupWizardController:
@@ -244,6 +275,83 @@ class SetupWizardController:
         setattr(target, name, value)
         self._working.validate()
         return getattr(getattr(self._working, section), name)
+
+    # -- microphone selection (STEP_MICROPHONE) ----------------------------
+
+    def available_microphones(self) -> List["MicrophoneChoice"]:
+        """List selectable microphones, with a leading "system default" entry.
+
+        The first entry always represents the system default (``index=None``);
+        the remaining entries are the enumerated input devices. The device that
+        PortAudio reports as the system default is flagged ``is_default`` so the
+        view can label it ``(Default)``. Never raises -- returns just the
+        default entry when no audio backend is available.
+        """
+        from mimosa.voice.audio_manager import AudioManager
+
+        choices: List[MicrophoneChoice] = [
+            MicrophoneChoice(index=None, name="System default microphone")
+        ]
+        try:
+            default = AudioManager.get_default_input_device()
+            default_index = default.index if default is not None else None
+            for dev in AudioManager.list_input_devices():
+                choices.append(
+                    MicrophoneChoice(
+                        index=dev.index,
+                        name=dev.name,
+                        is_default=(dev.index == default_index),
+                    )
+                )
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Could not enumerate microphones", exc_info=True)
+        return choices
+
+    def get_selected_microphone(self) -> Optional[int]:
+        """Return the working-copy input-device index, or ``None`` for default."""
+        from mimosa.voice.audio_manager import AudioManager
+
+        return AudioManager.resolve_device_index(self._working.voice.input_device)
+
+    def set_microphone(self, index: Optional[int]) -> None:
+        """Select a microphone by device index (``None`` = system default).
+
+        Stores the choice as a string in ``voice.input_device`` (``""`` for the
+        system default) so it round-trips through the existing config schema and
+        the Settings dialog's microphone field.
+        """
+        value = "" if index is None else str(int(index))
+        self.set_value("voice", "input_device", value)
+
+    def test_microphone(
+        self,
+        seconds: float = 2.0,
+        on_level: Optional[Any] = None,
+    ) -> Optional[float]:
+        """Record briefly from the selected mic and return the peak level.
+
+        Returns a normalised peak volume in ``[0, 1]``, or ``None`` if the audio
+        backend / device is unavailable (so the view can show a friendly
+        "couldn't access microphone" message instead of crashing). Calls
+        ``on_level(level)`` per chunk for a live meter when provided.
+        """
+        from mimosa.voice.audio_manager import (
+            AudioManager,
+            AudioUnavailableError,
+        )
+
+        index = self.get_selected_microphone()
+        mgr = AudioManager(device_index=index)
+        try:
+            return mgr.measure_levels(seconds=seconds, on_level=on_level)
+        except AudioUnavailableError:
+            logger.info("Microphone test requested but no audio backend available.")
+            return None
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Microphone test failed", exc_info=True)
+            return None
+        finally:
+            mgr.close()
 
     # -- completion --------------------------------------------------------
 

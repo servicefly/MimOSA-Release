@@ -86,6 +86,40 @@ class TestAudioManager:
             assert wf.getframerate() == 16000
             assert wf.readframes(wf.getnframes()) == pcm
 
+    # --- device selection (Fix #1) ---------------------------------------
+
+    def test_device_index_param_sets_input_device(self):
+        mgr = am.AudioManager(device_index=4)
+        assert mgr.input_device == 4
+        assert mgr.device_index == 4
+
+    def test_device_index_setter_aliases_input_device(self):
+        mgr = am.AudioManager()
+        mgr.device_index = 9
+        assert mgr.input_device == 9
+        mgr.device_index = None
+        assert mgr.input_device is None
+
+    def test_resolve_device_index_passthrough_and_parsing(self):
+        # Without a backend, numeric values pass through unchanged.
+        assert am.AudioManager.resolve_device_index(3) == 3
+        assert am.AudioManager.resolve_device_index("3") == 3
+        # Blank / None -> system default (None).
+        assert am.AudioManager.resolve_device_index("") is None
+        assert am.AudioManager.resolve_device_index(None) is None
+
+    def test_list_input_devices_is_static_and_safe(self):
+        # No PyAudio on this VM -> empty list, never raises.
+        assert am.AudioManager.list_input_devices() == []
+
+    def test_get_default_input_device_safe(self):
+        assert am.AudioManager.get_default_input_device() is None
+
+    def test_measure_levels_raises_without_backend(self):
+        mgr = am.AudioManager()
+        with pytest.raises(am.AudioUnavailableError):
+            mgr.measure_levels(seconds=0.1)
+
 
 # ---------------------------------------------------------------------------
 # Wake word

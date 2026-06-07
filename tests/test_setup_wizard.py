@@ -11,11 +11,13 @@ import pytest
 from mimosa.utils.config import AppConfig, AppConfigManager
 from mimosa.ui.setup_wizard import (
     STEP_FINISH,
+    STEP_MICROPHONE,
     STEP_PERSONALIZE,
     STEP_PRIVACY,
     STEP_SYSTEM,
     STEP_VOICE,
     STEP_WELCOME,
+    MicrophoneChoice,
     SetupWizardController,
     WizardStep,
     build_wizard_steps,
@@ -38,8 +40,8 @@ def manager(tmp_path, monkeypatch):
 def test_build_wizard_steps_order():
     steps = build_wizard_steps()
     assert [s.step_id for s in steps] == [
-        STEP_WELCOME, STEP_PERSONALIZE, STEP_VOICE, STEP_PRIVACY,
-        STEP_SYSTEM, STEP_FINISH
+        STEP_WELCOME, STEP_MICROPHONE, STEP_PERSONALIZE, STEP_VOICE,
+        STEP_PRIVACY, STEP_SYSTEM, STEP_FINISH
     ]
     assert all(isinstance(s, WizardStep) for s in steps)
 
@@ -73,7 +75,11 @@ def test_navigation_forward_back(manager):
     assert w.is_first
     assert w.current_step.step_id == STEP_WELCOME
     w.next()
+    assert w.current_step.step_id == STEP_MICROPHONE
+    w.next()
     assert w.current_step.step_id == STEP_PERSONALIZE
+    w.back()
+    assert w.current_step.step_id == STEP_MICROPHONE
     w.back()
     assert w.current_step.step_id == STEP_WELCOME
 
@@ -239,6 +245,67 @@ def test_personalize_blank_name_uses_defaults(manager):
     assert p.user_name == ""
     assert p.assistant_name == "MimOSA"  # default restored
     assert p.greeting() == "Hi, I'm MimOSA."
+
+
+# ---------------------------------------------------------------------------
+# "Choose Your Microphone" step (Fix #1)
+# ---------------------------------------------------------------------------
+
+def test_microphone_step_present():
+    steps = {s.step_id: s for s in build_wizard_steps()}
+    assert STEP_MICROPHONE in steps
+    step = steps[STEP_MICROPHONE]
+    assert step.title == "Choose Your Microphone"
+    # Custom-rendered in the dialog -> no declarative fields.
+    assert step.fields == ()
+
+
+def test_microphone_choice_label_default():
+    default = MicrophoneChoice(index=2, name="USB Mic", is_default=True)
+    plain = MicrophoneChoice(index=3, name="Webcam Mic")
+    assert default.label == "USB Mic (Default)"
+    assert plain.label == "Webcam Mic"
+
+
+def test_available_microphones_always_has_system_default(manager):
+    w = SetupWizardController(manager)
+    choices = w.available_microphones()
+    assert len(choices) >= 1
+    # First entry is always the "system default" sentinel (index=None).
+    assert choices[0].index is None
+    assert "default" in choices[0].name.lower()
+
+
+def test_set_and_get_selected_microphone_round_trip(manager):
+    w = SetupWizardController(manager)
+    w.set_microphone(5)
+    # Stored as a string in the config schema...
+    assert w.get_value("voice", "input_device") == "5"
+    # ...and resolves back to an int index.
+    assert w.get_selected_microphone() == 5
+
+
+def test_set_microphone_none_means_system_default(manager):
+    w = SetupWizardController(manager)
+    w.set_microphone(7)
+    w.set_microphone(None)
+    assert w.get_value("voice", "input_device") == ""
+    assert w.get_selected_microphone() is None
+
+
+def test_microphone_choice_persists_on_finish(manager):
+    w = SetupWizardController(manager)
+    w.set_microphone(3)
+    w.finish()
+    fresh = AppConfigManager(path=manager.path)
+    fresh.load()
+    assert fresh.get().voice.input_device == "3"
+
+
+def test_test_microphone_no_backend_returns_none(manager):
+    # Headless CI: no PyAudio/device available -> graceful None, never raises.
+    w = SetupWizardController(manager)
+    assert w.test_microphone(seconds=0.1) is None
 
 
 def test_personalize_invalid_verbosity_coerced(manager):
