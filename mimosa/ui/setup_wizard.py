@@ -22,7 +22,7 @@ from typing import Any, List, Optional, Tuple
 from mimosa.utils.config import (
     AppConfig,
     AppConfigManager,
-    LLM_PROVIDERS,
+    LLM_PROVIDERS_REQUIRING_KEY,
     MAX_HISTORY_LIMIT,
     MAX_WAKE_SENSITIVITY,
     MIN_HISTORY_LIMIT,
@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 STEP_WELCOME = "welcome"
 STEP_MICROPHONE = "microphone"
 STEP_SPEAKER = "speaker"
+STEP_LLM = "llm"
 STEP_PERSONALIZE = "personalize"
 STEP_VOICE = "voice"
 STEP_PRIVACY = "privacy"
@@ -86,6 +87,57 @@ class SpeakerChoice:
 
 
 @dataclass(frozen=True)
+class LLMProviderOption:
+    """A selectable LLM provider for the "Connect Your AI Brain" step.
+
+    Attributes:
+        key: The config value stored in ``privacy.llm_provider``.
+        label: Human-readable radio-button label.
+        description: One-line explanation shown beneath the label.
+        requires_key: Whether this provider needs an API key.
+        is_local: Whether this provider runs entirely on-device.
+    """
+
+    key: str
+    label: str
+    description: str
+    requires_key: bool = False
+    is_local: bool = False
+
+
+#: The provider options offered by the wizard's LLM step, in display order.
+#: Abacus.AI is first (the recommended default).
+LLM_PROVIDER_OPTIONS: Tuple[LLMProviderOption, ...] = (
+    LLMProviderOption(
+        "abacus", "Abacus.AI (recommended)",
+        "Smart cloud routing — great quality with one key. Best default.",
+        requires_key=True,
+    ),
+    LLMProviderOption(
+        "openai", "OpenAI",
+        "Use your own OpenAI API key (GPT models).",
+        requires_key=True,
+    ),
+    LLMProviderOption(
+        "anthropic", "Anthropic",
+        "Use your own Anthropic API key (Claude models).",
+        requires_key=True,
+    ),
+    LLMProviderOption(
+        "ollama", "Local Ollama",
+        "Run models fully on your machine with Ollama. No key, fully private.",
+        is_local=True,
+    ),
+)
+
+#: Default Ollama daemon endpoint probed to detect a local install.
+OLLAMA_PROBE_URL = "http://localhost:11434/api/tags"
+
+#: Where to get Ollama if it isn't installed.
+OLLAMA_INSTALL_URL = "https://ollama.com/download"
+
+
+@dataclass(frozen=True)
 class WizardStep:
     """One screen of the wizard: an id, a title, body text, and its fields."""
 
@@ -122,6 +174,16 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "play a short chime and confirm you can hear it. You can change this "
         "later in Settings.",
         # Rendered with a custom dropdown + test button by the dialog.
+        fields=(),
+    )
+    llm = WizardStep(
+        STEP_LLM,
+        "Connect Your AI Brain",
+        "MimOSA needs a language model to understand and answer you. Pick a "
+        "provider below. Abacus.AI is the easiest — paste a key and you're "
+        "done. Prefer to keep everything on your machine? Choose Local Ollama. "
+        "This step is required so MimOSA can think.",
+        # Rendered with custom radio buttons + masked key entry by the dialog.
         fields=(),
     )
     personalize = WizardStep(
@@ -170,12 +232,9 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
     privacy = WizardStep(
         STEP_PRIVACY,
         "Privacy",
-        "MimOSA is private by design. Pick where answers are generated and how "
-        "much conversation history to keep.",
+        "MimOSA is private by design. You already chose your answer engine; "
+        "here you decide how much conversation history to keep.",
         fields=(
-            FieldSpec("privacy", "llm_provider", "Answer engine", "choice",
-                      choices=LLM_PROVIDERS,
-                      help="'none' and 'local' keep everything on your machine."),
             FieldSpec("privacy", "store_history", "Remember conversation", "bool",
                       help="Keep recent turns for context (never written to disk)."),
             FieldSpec("privacy", "conversation_history_limit", "History limit",
@@ -213,7 +272,7 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "Open Settings anytime to fine-tune things.",
         fields=(),
     )
-    return (welcome, microphone, speaker, personalize, voice, privacy,
+    return (welcome, microphone, speaker, llm, personalize, voice, privacy,
             system, finish)
 
 
@@ -499,6 +558,74 @@ class SetupWizardController:
                 value = int(amplitude * env * math.sin(2 * math.pi * freq * n / sample_rate))
                 samples += struct.pack("<h", value)
         return bytes(samples), sample_rate
+
+    # -- LLM provider selection (STEP_LLM) ---------------------------------
+
+    def llm_provider_options(self) -> Tuple["LLMProviderOption", ...]:
+        """Return the selectable LLM providers, in display order."""
+        return LLM_PROVIDER_OPTIONS
+
+    def get_llm_provider(self) -> str:
+        """Return the working-copy LLM provider key (e.g. ``"abacus"``)."""
+        return self._working.privacy.llm_provider
+
+    def set_llm_provider(self, provider: str) -> str:
+        """Select the LLM provider (stored in ``privacy.llm_provider``).
+
+        Returns the stored (validated) provider key.
+        """
+        return self.set_value("privacy", "llm_provider", provider)
+
+    def get_api_key(self) -> str:
+        """Return the working-copy API key for cloud providers."""
+        return self._working.privacy.api_key
+
+    def set_api_key(self, api_key: str) -> str:
+        """Store the API key (in ``privacy.api_key``); empty string clears it.
+
+        Returns the stored (validated/trimmed) value.
+        """
+        return self.set_value("privacy", "api_key", api_key or "")
+
+    @staticmethod
+    def provider_requires_key(provider: str) -> bool:
+        """Whether ``provider`` needs an API key to function."""
+        return provider in LLM_PROVIDERS_REQUIRING_KEY
+
+    def detect_ollama(self, timeout: float = 0.5) -> bool:
+        """Return ``True`` if a local Ollama daemon answers on port 11434.
+
+        Probes ``http://localhost:11434/api/tags`` with a short timeout. Never
+        raises -- returns ``False`` when Ollama is not installed/running or the
+        network stack is unavailable.
+        """
+        import urllib.request
+
+        try:
+            with urllib.request.urlopen(OLLAMA_PROBE_URL, timeout=timeout) as resp:
+                return 200 <= getattr(resp, "status", resp.getcode()) < 300
+        except Exception:
+            logger.debug("Ollama not detected on %s", OLLAMA_PROBE_URL,
+                         exc_info=True)
+            return False
+
+    def llm_step_valid(self) -> bool:
+        """Whether the LLM step is satisfied so the user may proceed.
+
+        Required-step rule:
+
+        * A cloud provider (abacus/openai/anthropic) needs a non-empty API key.
+        * Local Ollama needs a running daemon (so MimOSA can actually think).
+        * ``local``/``none`` (not offered as radio options here, but possible
+          via config) are always considered valid.
+        """
+        provider = (self.get_llm_provider() or "").strip().lower()
+        if provider in LLM_PROVIDERS_REQUIRING_KEY:
+            return bool((self.get_api_key() or "").strip())
+        if provider == "ollama":
+            return self.detect_ollama()
+        # "local"/"none" or anything else: nothing more required.
+        return True
 
     # -- completion --------------------------------------------------------
 

@@ -11,6 +11,7 @@ import pytest
 from mimosa.utils.config import AppConfig, AppConfigManager
 from mimosa.ui.setup_wizard import (
     STEP_FINISH,
+    STEP_LLM,
     STEP_MICROPHONE,
     STEP_PERSONALIZE,
     STEP_PRIVACY,
@@ -18,6 +19,7 @@ from mimosa.ui.setup_wizard import (
     STEP_SYSTEM,
     STEP_VOICE,
     STEP_WELCOME,
+    LLMProviderOption,
     MicrophoneChoice,
     SetupWizardController,
     SpeakerChoice,
@@ -42,8 +44,8 @@ def manager(tmp_path, monkeypatch):
 def test_build_wizard_steps_order():
     steps = build_wizard_steps()
     assert [s.step_id for s in steps] == [
-        STEP_WELCOME, STEP_MICROPHONE, STEP_SPEAKER, STEP_PERSONALIZE,
-        STEP_VOICE, STEP_PRIVACY, STEP_SYSTEM, STEP_FINISH
+        STEP_WELCOME, STEP_MICROPHONE, STEP_SPEAKER, STEP_LLM,
+        STEP_PERSONALIZE, STEP_VOICE, STEP_PRIVACY, STEP_SYSTEM, STEP_FINISH
     ]
     assert all(isinstance(s, WizardStep) for s in steps)
 
@@ -81,7 +83,11 @@ def test_navigation_forward_back(manager):
     w.next()
     assert w.current_step.step_id == STEP_SPEAKER
     w.next()
+    assert w.current_step.step_id == STEP_LLM
+    w.next()
     assert w.current_step.step_id == STEP_PERSONALIZE
+    w.back()
+    assert w.current_step.step_id == STEP_LLM
     w.back()
     assert w.current_step.step_id == STEP_SPEAKER
     w.back()
@@ -380,6 +386,83 @@ def test_build_chime_returns_pcm_bytes():
     assert isinstance(pcm, bytes)
     assert len(pcm) > 0
     assert rate > 0
+
+
+# ---------------------------------------------------------------------------
+# "Connect Your AI Brain" LLM step (Fix #7)
+# ---------------------------------------------------------------------------
+
+def test_llm_step_present():
+    steps = {s.step_id: s for s in build_wizard_steps()}
+    assert STEP_LLM in steps
+    step = steps[STEP_LLM]
+    assert step.title == "Connect Your AI Brain"
+    assert step.fields == ()
+
+
+def test_llm_provider_options_order_and_default():
+    w = SetupWizardController.__new__(SetupWizardController)
+    options = SetupWizardController.llm_provider_options(w)
+    keys = [o.key for o in options]
+    # Abacus first (recommended default), Ollama present as the local option.
+    assert keys[0] == "abacus"
+    assert "openai" in keys and "anthropic" in keys and "ollama" in keys
+    assert all(isinstance(o, LLMProviderOption) for o in options)
+
+
+def test_set_get_llm_provider_round_trip(manager):
+    w = SetupWizardController(manager)
+    w.set_llm_provider("openai")
+    assert w.get_llm_provider() == "openai"
+
+
+def test_set_get_api_key_round_trip_and_trim(manager):
+    w = SetupWizardController(manager)
+    w.set_api_key("  sk-test-123  ")
+    assert w.get_api_key() == "sk-test-123"
+
+
+def test_provider_requires_key():
+    assert SetupWizardController.provider_requires_key("abacus") is True
+    assert SetupWizardController.provider_requires_key("openai") is True
+    assert SetupWizardController.provider_requires_key("anthropic") is True
+    assert SetupWizardController.provider_requires_key("ollama") is False
+    assert SetupWizardController.provider_requires_key("none") is False
+
+
+def test_llm_step_valid_cloud_requires_key(manager):
+    w = SetupWizardController(manager)
+    w.set_llm_provider("abacus")
+    w.set_api_key("")
+    assert w.llm_step_valid() is False
+    w.set_api_key("sk-123")
+    assert w.llm_step_valid() is True
+
+
+def test_llm_step_valid_ollama_depends_on_detection(manager, monkeypatch):
+    w = SetupWizardController(manager)
+    w.set_llm_provider("ollama")
+    monkeypatch.setattr(w, "detect_ollama", lambda *a, **k: False)
+    assert w.llm_step_valid() is False
+    monkeypatch.setattr(w, "detect_ollama", lambda *a, **k: True)
+    assert w.llm_step_valid() is True
+
+
+def test_detect_ollama_no_daemon_returns_false(manager):
+    # No Ollama on CI -> graceful False, never raises.
+    w = SetupWizardController(manager)
+    assert w.detect_ollama(timeout=0.1) is False
+
+
+def test_llm_choice_persists_on_finish(manager):
+    w = SetupWizardController(manager)
+    w.set_llm_provider("openai")
+    w.set_api_key("sk-persist")
+    w.finish()
+    fresh = AppConfigManager(path=manager.path)
+    fresh.load()
+    assert fresh.get().privacy.llm_provider == "openai"
+    assert fresh.get().privacy.api_key == "sk-persist"
 
 
 def test_personalize_invalid_verbosity_coerced(manager):

@@ -55,8 +55,13 @@ WHISPER_MODELS = ("tiny", "base", "small", "medium", "large")
 DEFAULT_WHISPER_MODEL = "base"
 
 #: LLM providers. ``none`` disables the LLM entirely (skills-only operation).
-LLM_PROVIDERS = ("abacus", "local", "none")
+#: ``abacus``/``openai``/``anthropic`` are cloud providers that require an API
+#: key; ``ollama``/``local`` run on-device (no key needed).
+LLM_PROVIDERS = ("abacus", "openai", "anthropic", "ollama", "local", "none")
 DEFAULT_LLM_PROVIDER = "abacus"
+
+#: Cloud providers that require an API key to function.
+LLM_PROVIDERS_REQUIRING_KEY = ("abacus", "openai", "anthropic")
 
 #: Wake-word sensitivity / TTS speed bounds.
 MIN_WAKE_SENSITIVITY = 0.0
@@ -332,6 +337,10 @@ class PrivacySettings:
     """LLM provider choice and conversation-history/data-retention policy."""
 
     llm_provider: str = DEFAULT_LLM_PROVIDER
+    #: API key for cloud providers (abacus/openai/anthropic). Stored locally
+    #: only; never transmitted anywhere except the chosen provider's endpoint.
+    #: Empty for on-device providers (ollama/local) and ``none``.
+    api_key: str = ""
     conversation_history_limit: int = DEFAULT_HISTORY_LIMIT
     store_history: bool = True
     data_retention_days: int = DEFAULT_RETENTION_DAYS
@@ -350,6 +359,7 @@ class PrivacySettings:
     def validate(self) -> "PrivacySettings":
         if self.llm_provider not in LLM_PROVIDERS:
             self.llm_provider = DEFAULT_LLM_PROVIDER
+        self.api_key = str(self.api_key or "").strip()
         self.persist_conversations = bool(self.persist_conversations)
         self.learn_preferences = bool(self.learn_preferences)
         self.semantic_memory = bool(self.semantic_memory)
@@ -378,8 +388,12 @@ class PrivacySettings:
         """Return a short human-readable summary of the privacy posture."""
         if self.llm_provider == "none":
             llm = "No LLM (skills-only; fully offline)"
-        elif self.llm_provider == "local":
+        elif self.llm_provider in ("local", "ollama"):
             llm = "Local LLM (on-device; nothing leaves your machine)"
+        elif self.llm_provider == "openai":
+            llm = "OpenAI cloud LLM (queries sent to OpenAI)"
+        elif self.llm_provider == "anthropic":
+            llm = "Anthropic cloud LLM (queries sent to Anthropic)"
         else:
             llm = "Abacus.AI cloud LLM (queries sent to Abacus.AI)"
         hist = (

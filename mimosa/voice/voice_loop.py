@@ -232,12 +232,20 @@ class VoiceLoop:
             from mimosa.core.intent_router import IntentRouter
             from mimosa.llm.provider_factory import create_provider
 
+            # Load the unified config once so we can honour the LLM provider /
+            # API key the user chose in the setup wizard's "Connect Your AI
+            # Brain" step, and load their custom skills (M4.1).
+            app_cfg = None
             try:
-                provider = create_provider()
-            except Exception as exc:  # provider misconfig shouldn't crash setup
-                logger.warning("Could not create LLM provider (%s); "
-                               "LLM-backed skills will degrade.", exc)
-                provider = None
+                from mimosa.utils.config import AppConfigManager
+
+                _mgr = AppConfigManager()
+                _mgr.load()
+                app_cfg = _mgr.get()
+            except Exception as exc:  # pragma: no cover - config optional
+                logger.debug("Could not load config for LLM/skills (%s)", exc)
+
+            provider = self._build_configured_provider(app_cfg, create_provider)
 
             # Load user-defined custom skills (M4.1) from the unified config so
             # the user's own commands are active. Best-effort: a missing/corrupt
@@ -245,13 +253,11 @@ class VoiceLoop:
             custom_skills = []
             try:
                 from mimosa.skills.custom_skill import build_custom_skills
-                from mimosa.utils.config import AppConfigManager
 
-                cfg = AppConfigManager()
-                cfg.load()
-                custom_skills = build_custom_skills(
-                    cfg.get().skills.custom_specs(), llm_provider=provider
-                )
+                if app_cfg is not None:
+                    custom_skills = build_custom_skills(
+                        app_cfg.skills.custom_specs(), llm_provider=provider
+                    )
             except Exception as exc:  # pragma: no cover - config optional
                 logger.debug("Could not load custom skills (%s)", exc)
 
@@ -262,6 +268,43 @@ class VoiceLoop:
                 personality=self._personality,
             )
         return self._router
+
+    @staticmethod
+    def _build_configured_provider(app_cfg, create_provider):
+        """Create the LLM provider chosen in the setup wizard / config.
+
+        Honours ``privacy.llm_provider`` and ``privacy.api_key``:
+
+        * ``"none"`` -> no LLM (skills-only); returns ``None``.
+        * ``"ollama"``/``"local"`` -> on-device provider (no key needed).
+        * ``"abacus"``/``"openai"``/``"anthropic"`` -> cloud provider, with the
+          stored API key passed through.
+
+        Falls back to the factory default if config is unavailable. Never
+        raises -- a misconfigured provider degrades to ``None`` so the rest of
+        the assistant still runs.
+        """
+        try:
+            if app_cfg is None:
+                return create_provider()
+
+            provider_name = (app_cfg.privacy.llm_provider or "").strip().lower()
+            if provider_name == "none":
+                logger.info("LLM disabled (provider 'none'); skills-only mode.")
+                return None
+
+            options = {}
+            api_key = (getattr(app_cfg.privacy, "api_key", "") or "").strip()
+            if api_key:
+                options["api_key"] = api_key
+
+            if not provider_name:
+                return create_provider(**options)
+            return create_provider(provider_name, **options)
+        except Exception as exc:  # provider misconfig shouldn't crash setup
+            logger.warning("Could not create LLM provider (%s); "
+                           "LLM-backed skills will degrade.", exc)
+            return None
 
     @property
     def conversation(self):

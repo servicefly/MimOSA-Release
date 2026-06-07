@@ -19,6 +19,8 @@ import threading
 from typing import Any, Callable, Optional
 
 from mimosa.ui.setup_wizard import (
+    OLLAMA_INSTALL_URL,
+    STEP_LLM,
     STEP_MICROPHONE,
     STEP_SPEAKER,
     SetupWizardController,
@@ -105,6 +107,13 @@ if HAS_GTK:
 
         def _go(self, direction: int) -> None:
             self._commit_visible_fields()
+            # The "Connect Your AI Brain" step is required: block forward
+            # navigation until a usable provider + key (or local Ollama) is set.
+            if (direction > 0
+                    and self._controller.current_step.step_id == STEP_LLM
+                    and not self._controller.llm_step_valid()):
+                self._flag_llm_incomplete()
+                return
             if direction > 0 and self._controller.is_last:
                 self._controller.finish()
                 self._close(applied=True)
@@ -135,10 +144,15 @@ if HAS_GTK:
                 self._fields_box.remove(child)
                 child = self._fields_box.get_first_child()
             self._widgets = []
+            # Default to an enabled Next button; the (required) LLM step may
+            # disable it until a valid provider/key is chosen.
+            self._next_btn.set_sensitive(True)
             if step.step_id == STEP_MICROPHONE:
                 self._render_microphone()
             elif step.step_id == STEP_SPEAKER:
                 self._render_speaker()
+            elif step.step_id == STEP_LLM:
+                self._render_llm()
             else:
                 for spec in step.fields:
                     row, widget = self._build_field(spec)
@@ -318,6 +332,157 @@ if HAS_GTK:
                     "continue — you can change this later in Settings."
                 )
             return False  # one-shot idle callback
+
+        # -- LLM step (custom UI) ------------------------------------------
+
+        def _render_llm(self) -> None:
+            """Build the provider radio group, masked key entry & Ollama help."""
+            self._llm_options = self._controller.llm_provider_options()
+            current = self._controller.get_llm_provider()
+
+            self._llm_radios = {}
+            group_leader = None
+            for opt in self._llm_options:
+                radio = Gtk.CheckButton(label=opt.label)
+                if group_leader is None:
+                    group_leader = radio
+                else:
+                    radio.set_group(group_leader)
+                if opt.key == current:
+                    radio.set_active(True)
+                radio.connect("toggled", self._on_llm_provider_toggled, opt.key)
+                self._fields_box.append(radio)
+                # One-line description under each radio.
+                desc = Gtk.Label(label=opt.description, xalign=0, wrap=True)
+                desc.add_css_class("dim-label")
+                desc.set_margin_start(28)
+                self._fields_box.append(desc)
+                self._llm_radios[opt.key] = radio
+
+            # Masked API-key entry (shown only for cloud providers).
+            self._llm_key_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                                        spacing=10)
+            self._llm_key_box.set_margin_top(8)
+            self._llm_key_box.append(
+                Gtk.Label(label="API key", xalign=0, hexpand=True)
+            )
+            self._llm_key_entry = Gtk.Entry()
+            self._llm_key_entry.set_visibility(False)  # mask the secret
+            self._llm_key_entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+            self._llm_key_entry.set_placeholder_text("Paste your API key")
+            self._llm_key_entry.set_hexpand(True)
+            self._llm_key_entry.set_text(self._controller.get_api_key() or "")
+            self._llm_key_entry.connect("changed", self._on_llm_key_changed)
+            # Eye toggle to reveal/hide the key.
+            self._llm_key_entry.set_icon_from_icon_name(
+                Gtk.EntryIconPosition.SECONDARY, "view-reveal-symbolic"
+            )
+            self._llm_key_entry.connect("icon-press", self._on_llm_key_reveal)
+            self._llm_key_box.append(self._llm_key_entry)
+            self._fields_box.append(self._llm_key_box)
+
+            # Ollama detection / install help (shown only for the Ollama option).
+            self._llm_ollama_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                           spacing=4)
+            self._llm_ollama_status = Gtk.Label(xalign=0, wrap=True)
+            self._llm_ollama_box.append(self._llm_ollama_status)
+            self._llm_ollama_link = Gtk.LinkButton.new_with_label(
+                OLLAMA_INSTALL_URL, "Get Ollama (opens ollama.com)"
+            )
+            self._llm_ollama_link.set_halign(Gtk.Align.START)
+            self._llm_ollama_box.append(self._llm_ollama_link)
+            self._fields_box.append(self._llm_ollama_box)
+
+            # Validation status line.
+            self._llm_status = Gtk.Label(xalign=0, wrap=True)
+            self._llm_status.add_css_class("dim-label")
+            self._fields_box.append(self._llm_status)
+
+            self._refresh_llm_step()
+
+        def _selected_llm_key(self) -> str:
+            for key, radio in getattr(self, "_llm_radios", {}).items():
+                if radio.get_active():
+                    return key
+            return self._controller.get_llm_provider()
+
+        def _on_llm_provider_toggled(self, radio, key) -> None:
+            if not radio.get_active():
+                return  # only react to the newly-selected radio
+            self._controller.set_llm_provider(key)
+            self._refresh_llm_step()
+
+        def _on_llm_key_changed(self, entry) -> None:
+            self._controller.set_api_key(entry.get_text())
+            self._refresh_llm_step(probe_ollama=False)
+
+        def _on_llm_key_reveal(self, entry, _icon_pos) -> None:
+            visible = not entry.get_visibility()
+            entry.set_visibility(visible)
+            entry.set_icon_from_icon_name(
+                Gtk.EntryIconPosition.SECONDARY,
+                "view-conceal-symbolic" if visible else "view-reveal-symbolic",
+            )
+
+        def _refresh_llm_step(self, probe_ollama: bool = True) -> None:
+            """Show/hide the key entry & Ollama help for the current provider,
+            and update the validation status + Next button sensitivity."""
+            key = self._selected_llm_key()
+            needs_key = self._controller.provider_requires_key(key)
+            is_ollama = key == "ollama"
+
+            self._llm_key_box.set_visible(needs_key)
+            self._llm_ollama_box.set_visible(is_ollama)
+
+            if is_ollama and probe_ollama:
+                # Probe on a worker thread so the UI never blocks.
+                self._llm_ollama_status.set_text("Checking for a local Ollama…")
+
+                def _worker():
+                    found = self._controller.detect_ollama()
+                    GLib.idle_add(self._apply_ollama_result, found)
+
+                threading.Thread(target=_worker, name="mimosa-ollama-probe",
+                                 daemon=True).start()
+            elif not is_ollama:
+                self._update_llm_status()
+
+        def _apply_ollama_result(self, found: bool) -> bool:
+            if found:
+                self._llm_ollama_status.set_text(
+                    "✓ Found a running Ollama. You're all set — no key needed."
+                )
+                self._llm_ollama_link.set_visible(False)
+            else:
+                self._llm_ollama_status.set_text(
+                    "Ollama isn't running yet. Install it, then run "
+                    "\u201collama serve\u201d and pull a model (e.g. "
+                    "\u201collama pull llama3.1:8b\u201d)."
+                )
+                self._llm_ollama_link.set_visible(True)
+            self._update_llm_status()
+            return False  # one-shot idle callback
+
+        def _update_llm_status(self) -> None:
+            valid = self._controller.llm_step_valid()
+            self._next_btn.set_sensitive(valid)
+            if valid:
+                self._llm_status.set_text("Looks good — you can continue.")
+            else:
+                key = self._selected_llm_key()
+                if self._controller.provider_requires_key(key):
+                    self._llm_status.set_text(
+                        "Enter your API key to continue (this step is required)."
+                    )
+                else:
+                    self._llm_status.set_text(
+                        "Start Ollama to continue, or pick a cloud provider "
+                        "(this step is required)."
+                    )
+
+        def _flag_llm_incomplete(self) -> None:
+            """Called when the user tries to advance without a valid choice."""
+            self._update_llm_status()
 
         def _build_field(self, spec):
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)

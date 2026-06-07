@@ -28,13 +28,19 @@ import os
 from typing import Dict, Optional, Type
 
 from mimosa.llm.abacus_provider import AbacusProvider
+from mimosa.llm.anthropic_provider import AnthropicProvider
 from mimosa.llm.base_provider import BaseLLMProvider
 from mimosa.llm.local_provider import LocalProvider
+from mimosa.llm.openai_provider import OpenAIProvider
 
 #: Maps a provider key to its implementing class. Extend this to add backends
-#: (e.g. ``"openai": OpenAIProvider``) without touching call sites.
+#: without touching call sites. ``"ollama"`` is an alias for the on-device
+#: :class:`LocalProvider` (which speaks the Ollama daemon protocol).
 PROVIDER_REGISTRY: Dict[str, Type[BaseLLMProvider]] = {
     "abacus": AbacusProvider,
+    "openai": OpenAIProvider,
+    "anthropic": AnthropicProvider,
+    "ollama": LocalProvider,
     "local": LocalProvider,
 }
 
