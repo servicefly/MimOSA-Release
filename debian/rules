@@ -31,6 +31,20 @@ override_dh_auto_install:
 	# Ship the .desktop launcher so MimOSA appears in the applications menu.
 	mkdir -p debian/mimosa-assistant/usr/share/applications
 	cp debian/mimosa.desktop debian/mimosa-assistant/usr/share/applications/
+	# Install the app icon into the hicolor theme so Icon=mimosa resolves.
+	for sz in 16 32 48 128 256; do \
+		mkdir -p debian/mimosa-assistant/usr/share/icons/hicolor/$${sz}x$${sz}/apps; \
+		cp mimosa/ui/assets/icons/mimosa-$${sz}.png \
+			debian/mimosa-assistant/usr/share/icons/hicolor/$${sz}x$${sz}/apps/mimosa.png; \
+	done
+	# Scalable SVG variant for crisp rendering at any size.
+	mkdir -p debian/mimosa-assistant/usr/share/icons/hicolor/scalable/apps
+	cp mimosa/ui/assets/mimosa-icon.svg \
+		debian/mimosa-assistant/usr/share/icons/hicolor/scalable/apps/mimosa.svg
+	# Also provide a pixmap fallback for older menu implementations.
+	mkdir -p debian/mimosa-assistant/usr/share/pixmaps
+	cp mimosa/ui/assets/icons/mimosa-128.png \
+		debian/mimosa-assistant/usr/share/pixmaps/mimosa.png
 
 override_dh_installsystemd:
 	# No system services.

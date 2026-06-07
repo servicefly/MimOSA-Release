@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MimOSA application icon.
+
+  A faithful, static rendering of the avatar's IDLE "breathing circle":
+  a dark base disc with a soft radial gradient, a glowing accent ring, and
+  a luminous core glow. Colours match the default "aurora" theme defined in
+  mimosa/ui/ui_config.py (base #1A1F2E -> #242B40, idle accent #5CA6F0,
+  with a teal #33D9A0 highlight echoing the listening state).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"
+     viewBox="0 0 256 256" fill="none">
+  <defs>
+    <!-- Base disc: lighter at the centre, darker at the rim. -->
+    <radialGradient id="baseGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"  stop-color="#242B40"/>
+      <stop offset="100%" stop-color="#1A1F2E"/>
+    </radialGradient>
+
+    <!-- Core glow: bright accent fading to transparent (the "breath"). -->
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"  stop-color="#7FC0FF" stop-opacity="0.95"/>
+      <stop offset="45%" stop-color="#5CA6F0" stop-opacity="0.70"/>
+      <stop offset="100%" stop-color="#5CA6F0" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Ring stroke: blue accent blending toward the listening teal. -->
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"  stop-color="#5CA6F0"/>
+      <stop offset="100%" stop-color="#33D9A0"/>
+    </linearGradient>
+
+    <filter id="soften" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.5"/>
+    </filter>
+  </defs>
+
+  <!-- Base disc (radius 0.86 * 128 ~= 110). -->
+  <circle cx="128" cy="128" r="110" fill="url(#baseGrad)"/>
+
+  <!-- Accent ring (line width ~ radius * 0.045). -->
+  <circle cx="128" cy="128" r="110" fill="none"
+          stroke="url(#ringGrad)" stroke-width="9" opacity="0.95"/>
+
+  <!-- Soft core glow (radius ~ 0.55 * 110). -->
+  <circle cx="128" cy="128" r="78" fill="url(#coreGlow)" filter="url(#soften)"/>
+
+  <!-- Bright centre highlight for a crisp focal point. -->
+  <circle cx="128" cy="128" r="20" fill="#CFE6FF" opacity="0.9"/>
+</svg>
