@@ -112,9 +112,9 @@ fi
 # 3. Decide which apt packages to install
 # --------------------------------------------------------------------------
 # Always-needed base packages.
-# pkg-config and libcairo2-dev are required to build the Python C extensions
-# (pycairo / PyGObject) that MimOSA depends on.
-APT_PACKAGES=(python3 python3-venv python3-pip git pkg-config libcairo2-dev)
+# pkg-config, libcairo2-dev and libgirepository1.0-dev are required to build the
+# Python C extensions (pycairo / PyGObject) that MimOSA depends on.
+APT_PACKAGES=(python3 python3-venv python3-pip git pkg-config libcairo2-dev libgirepository1.0-dev)
 
 # Prefer an explicit modern Python if the repo provides it; harmless if absent.
 APT_OPTIONAL=(python3.11 python3.11-venv)
@@ -129,7 +129,7 @@ fi
 
 echo
 step "Packages to install via apt"
-info "Base:  python3 python3-venv python3-pip git pkg-config libcairo2-dev"
+info "Base:  python3 python3-venv python3-pip git pkg-config libcairo2-dev libgirepository1.0-dev"
 [[ $WITH_VOICE -eq 1 ]] && info "Voice: portaudio19-dev libsndfile1 ffmpeg" || warn "Voice packages skipped (--no-voice/--core)"
 [[ $WITH_UI -eq 1 ]]    && info "UI:    GTK4 + PyGObject bindings"          || warn "UI packages skipped (--no-ui/--core)"
 echo
