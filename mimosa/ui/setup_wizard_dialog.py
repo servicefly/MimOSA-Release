@@ -20,6 +20,7 @@ from typing import Any, Callable, Optional
 
 from mimosa.ui.setup_wizard import (
     STEP_MICROPHONE,
+    STEP_SPEAKER,
     SetupWizardController,
     WizardStep,
 )
@@ -136,6 +137,8 @@ if HAS_GTK:
             self._widgets = []
             if step.step_id == STEP_MICROPHONE:
                 self._render_microphone()
+            elif step.step_id == STEP_SPEAKER:
+                self._render_speaker()
             else:
                 for spec in step.fields:
                     row, widget = self._build_field(spec)
@@ -235,6 +238,84 @@ if HAS_GTK:
                 self._mic_status.set_text(
                     f"Looks good! Peak level {int(peak * 100)}%. This microphone "
                     "is working."
+                )
+            return False  # one-shot idle callback
+
+        # -- speaker step (custom UI) --------------------------------------
+
+        def _render_speaker(self) -> None:
+            """Build the output-device dropdown, Test Speaker button & status."""
+            self._spk_testing = False
+            self._spk_choices = self._controller.available_speakers()
+
+            # Device dropdown.
+            picker = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            picker.append(Gtk.Label(label="Speaker", xalign=0, hexpand=True))
+            self._spk_dropdown = Gtk.DropDown.new_from_strings(
+                [c.label for c in self._spk_choices]
+            )
+            # Pre-select the device already chosen (or the flagged default).
+            selected_index = self._controller.get_selected_speaker()
+            preselect = 0
+            for i, c in enumerate(self._spk_choices):
+                if c.index == selected_index and selected_index is not None:
+                    preselect = i
+                    break
+                if selected_index is None and c.is_default:
+                    preselect = i
+            self._spk_dropdown.set_selected(preselect)
+            self._spk_dropdown.connect("notify::selected", self._on_spk_selected)
+            picker.append(self._spk_dropdown)
+            self._fields_box.append(picker)
+            # Commit the pre-selected device immediately.
+            self._on_spk_selected(self._spk_dropdown, None)
+
+            # Test button.
+            self._spk_test_btn = Gtk.Button(label="Test Speaker")
+            self._spk_test_btn.connect("clicked", self._on_test_speaker)
+            self._fields_box.append(self._spk_test_btn)
+
+            # Status label.
+            self._spk_status = Gtk.Label(
+                label="Select your speaker, then click \u201cTest Speaker\u201d to "
+                "hear a chime.",
+                xalign=0, wrap=True,
+            )
+            self._fields_box.append(self._spk_status)
+
+        def _on_spk_selected(self, dropdown, _pspec) -> None:
+            idx = dropdown.get_selected()
+            if 0 <= idx < len(self._spk_choices):
+                self._controller.set_speaker(self._spk_choices[idx].index)
+
+        def _on_test_speaker(self, _button) -> None:
+            if getattr(self, "_spk_testing", False):
+                return
+            self._spk_testing = True
+            self._spk_test_btn.set_sensitive(False)
+            self._spk_test_btn.set_label("Playing chime…")
+            self._spk_status.set_text("Playing a short chime — can you hear it?")
+
+            def _worker() -> None:
+                ok = self._controller.test_speaker(seconds=1.0)
+                GLib.idle_add(self._finish_spk_test, ok)
+
+            threading.Thread(target=_worker, name="mimosa-spk-test",
+                             daemon=True).start()
+
+        def _finish_spk_test(self, ok: bool) -> bool:
+            self._spk_testing = False
+            self._spk_test_btn.set_sensitive(True)
+            self._spk_test_btn.set_label("Test Speaker")
+            if ok:
+                self._spk_status.set_text(
+                    "Played a chime. If you heard it, this speaker is working! "
+                    "If not, pick another device and test again."
+                )
+            else:
+                self._spk_status.set_text(
+                    "Couldn't access that speaker. Try a different device, or "
+                    "continue — you can change this later in Settings."
                 )
             return False  # one-shot idle callback
 

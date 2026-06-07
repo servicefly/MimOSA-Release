@@ -14,11 +14,13 @@ from mimosa.ui.setup_wizard import (
     STEP_MICROPHONE,
     STEP_PERSONALIZE,
     STEP_PRIVACY,
+    STEP_SPEAKER,
     STEP_SYSTEM,
     STEP_VOICE,
     STEP_WELCOME,
     MicrophoneChoice,
     SetupWizardController,
+    SpeakerChoice,
     WizardStep,
     build_wizard_steps,
 )
@@ -40,8 +42,8 @@ def manager(tmp_path, monkeypatch):
 def test_build_wizard_steps_order():
     steps = build_wizard_steps()
     assert [s.step_id for s in steps] == [
-        STEP_WELCOME, STEP_MICROPHONE, STEP_PERSONALIZE, STEP_VOICE,
-        STEP_PRIVACY, STEP_SYSTEM, STEP_FINISH
+        STEP_WELCOME, STEP_MICROPHONE, STEP_SPEAKER, STEP_PERSONALIZE,
+        STEP_VOICE, STEP_PRIVACY, STEP_SYSTEM, STEP_FINISH
     ]
     assert all(isinstance(s, WizardStep) for s in steps)
 
@@ -77,7 +79,11 @@ def test_navigation_forward_back(manager):
     w.next()
     assert w.current_step.step_id == STEP_MICROPHONE
     w.next()
+    assert w.current_step.step_id == STEP_SPEAKER
+    w.next()
     assert w.current_step.step_id == STEP_PERSONALIZE
+    w.back()
+    assert w.current_step.step_id == STEP_SPEAKER
     w.back()
     assert w.current_step.step_id == STEP_MICROPHONE
     w.back()
@@ -306,6 +312,74 @@ def test_test_microphone_no_backend_returns_none(manager):
     # Headless CI: no PyAudio/device available -> graceful None, never raises.
     w = SetupWizardController(manager)
     assert w.test_microphone(seconds=0.1) is None
+
+
+# ---------------------------------------------------------------------------
+# "Choose Your Speaker" step (Fix #6)
+# ---------------------------------------------------------------------------
+
+def test_speaker_step_present():
+    steps = {s.step_id: s for s in build_wizard_steps()}
+    assert STEP_SPEAKER in steps
+    step = steps[STEP_SPEAKER]
+    assert step.title == "Choose Your Speaker"
+    # Custom-rendered in the dialog -> no declarative fields.
+    assert step.fields == ()
+
+
+def test_speaker_choice_label_default():
+    default = SpeakerChoice(index=2, name="USB Speaker", is_default=True)
+    plain = SpeakerChoice(index=3, name="HDMI Audio")
+    assert default.label == "USB Speaker (Default)"
+    assert plain.label == "HDMI Audio"
+
+
+def test_available_speakers_always_has_system_default(manager):
+    w = SetupWizardController(manager)
+    choices = w.available_speakers()
+    assert len(choices) >= 1
+    # First entry is always the "system default" sentinel (index=None).
+    assert choices[0].index is None
+    assert "default" in choices[0].name.lower()
+
+
+def test_set_and_get_selected_speaker_round_trip(manager):
+    w = SetupWizardController(manager)
+    w.set_speaker(4)
+    # Stored as a string in the config schema...
+    assert w.get_value("voice", "output_device") == "4"
+    # ...and resolves back to an int index.
+    assert w.get_selected_speaker() == 4
+
+
+def test_set_speaker_none_means_system_default(manager):
+    w = SetupWizardController(manager)
+    w.set_speaker(6)
+    w.set_speaker(None)
+    assert w.get_value("voice", "output_device") == ""
+    assert w.get_selected_speaker() is None
+
+
+def test_speaker_choice_persists_on_finish(manager):
+    w = SetupWizardController(manager)
+    w.set_speaker(2)
+    w.finish()
+    fresh = AppConfigManager(path=manager.path)
+    fresh.load()
+    assert fresh.get().voice.output_device == "2"
+
+
+def test_test_speaker_no_backend_returns_false(manager):
+    # Headless CI: no PyAudio/device available -> graceful False, never raises.
+    w = SetupWizardController(manager)
+    assert w.test_speaker(seconds=0.1) is False
+
+
+def test_build_chime_returns_pcm_bytes():
+    pcm, rate = SetupWizardController._build_chime(duration=0.4)
+    assert isinstance(pcm, bytes)
+    assert len(pcm) > 0
+    assert rate > 0
 
 
 def test_personalize_invalid_verbosity_coerced(manager):

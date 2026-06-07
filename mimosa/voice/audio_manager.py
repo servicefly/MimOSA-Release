@@ -303,6 +303,70 @@ class AudioManager:
                     pass
 
     @staticmethod
+    def get_default_output_device() -> Optional[AudioDevice]:
+        """Return the system default output device, or ``None`` if unavailable.
+
+        Mirrors PortAudio's notion of the default playback device so the setup
+        wizard can pre-select and label it ``(Default)``.
+        """
+        try:
+            import pyaudio  # imported lazily; optional dependency
+        except Exception:
+            return None
+        pa = None
+        try:
+            pa = pyaudio.PyAudio()
+            info = pa.get_default_output_device_info()
+            return AudioDevice(
+                index=int(info.get("index", 0)),
+                name=str(info.get("name", "default")),
+                max_input_channels=int(info.get("maxInputChannels", 0)),
+                max_output_channels=int(info.get("maxOutputChannels", 0)),
+                default_sample_rate=int(info.get("defaultSampleRate", 16000)),
+            )
+        except Exception:  # no default device, or backend missing
+            return None
+        finally:
+            if pa is not None:
+                try:
+                    pa.terminate()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
+    @staticmethod
+    def resolve_output_device_index(value) -> Optional[int]:
+        """Resolve a stored config value to a concrete output-device index.
+
+        The playback counterpart to :meth:`resolve_device_index`. Accepts
+        ``None``/``""`` (→ system default, returns ``None``), an int or numeric
+        string (→ that index, if it exists), or a device *name* (→ the index of
+        the first output device whose name matches). Returns ``None`` when the
+        value can't be resolved, so callers fall back to the default.
+        """
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        outputs = AudioManager.list_output_devices()
+        valid = {d.index for d in outputs}
+        # Numeric index (e.g. "3" or 3).
+        try:
+            idx = int(text)
+            return idx if idx in valid else (idx if not outputs else None)
+        except (TypeError, ValueError):
+            pass
+        # Name match (case-insensitive, exact then substring).
+        lowered = text.lower()
+        for d in outputs:
+            if d.name.lower() == lowered:
+                return d.index
+        for d in outputs:
+            if lowered in d.name.lower():
+                return d.index
+        return None
+
+    @staticmethod
     def resolve_device_index(value) -> Optional[int]:
         """Resolve a stored config value to a concrete input-device index.
 

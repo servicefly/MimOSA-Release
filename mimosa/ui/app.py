@@ -109,11 +109,15 @@ class MimOSAApplication:
             # listens with the right device instead of the system default.
             voice_cfg = self.config_manager.get().voice
             device_index = AudioManager.resolve_device_index(voice_cfg.input_device)
+            output_index = AudioManager.resolve_output_device_index(
+                voice_cfg.output_device
+            )
 
             self._voice_loop = VoiceLoop(
                 error_reporter=self.services.error_reporter,
                 personality=self.config_manager.get().personality,
                 input_device_index=device_index,
+                output_device_index=output_index,
             )
         return self._voice_loop
 

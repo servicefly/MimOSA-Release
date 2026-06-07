@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # -- step identifiers (stable; used by the view & tests) --------------------
 STEP_WELCOME = "welcome"
 STEP_MICROPHONE = "microphone"
+STEP_SPEAKER = "speaker"
 STEP_PERSONALIZE = "personalize"
 STEP_VOICE = "voice"
 STEP_PRIVACY = "privacy"
@@ -52,6 +53,26 @@ class MicrophoneChoice:
         index: PyAudio device index (``None`` means "system default").
         name: Human-readable device name.
         is_default: Whether this is the system default input device.
+    """
+
+    index: Optional[int]
+    name: str
+    is_default: bool = False
+
+    @property
+    def label(self) -> str:
+        """Dropdown label, suffixed with ``(Default)`` for the default device."""
+        return f"{self.name} (Default)" if self.is_default else self.name
+
+
+@dataclass(frozen=True)
+class SpeakerChoice:
+    """A selectable speaker/output device for the wizard's device dropdown.
+
+    Attributes:
+        index: PyAudio device index (``None`` means "system default").
+        name: Human-readable device name.
+        is_default: Whether this is the system default output device.
     """
 
     index: Optional[int]
@@ -91,6 +112,16 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "meter should move. You can change this later in Settings.",
         # Rendered with a custom dropdown + test meter by the dialog, so no
         # declarative fields here.
+        fields=(),
+    )
+    speaker = WizardStep(
+        STEP_SPEAKER,
+        "Choose Your Speaker",
+        "Pick the speaker or headphones MimOSA should talk through. If you're "
+        "not sure, leave it on the system default. Click \"Test Speaker\" to "
+        "play a short chime and confirm you can hear it. You can change this "
+        "later in Settings.",
+        # Rendered with a custom dropdown + test button by the dialog.
         fields=(),
     )
     personalize = WizardStep(
@@ -182,7 +213,8 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "Open Settings anytime to fine-tune things.",
         fields=(),
     )
-    return (welcome, microphone, personalize, voice, privacy, system, finish)
+    return (welcome, microphone, speaker, personalize, voice, privacy,
+            system, finish)
 
 
 class SetupWizardController:
@@ -362,6 +394,111 @@ class SetupWizardController:
             return None
         finally:
             mgr.close()
+
+    # -- speaker selection (STEP_SPEAKER) ----------------------------------
+
+    def available_speakers(self) -> List["SpeakerChoice"]:
+        """List selectable speakers, with a leading "system default" entry.
+
+        The first entry always represents the system default (``index=None``);
+        the remaining entries are the enumerated output devices. The device that
+        PortAudio reports as the system default is flagged ``is_default`` so the
+        view can label it ``(Default)``. Never raises -- returns just the
+        default entry when no audio backend is available.
+        """
+        from mimosa.voice.audio_manager import AudioManager
+
+        choices: List[SpeakerChoice] = [
+            SpeakerChoice(index=None, name="System default speaker")
+        ]
+        try:
+            default = AudioManager.get_default_output_device()
+            default_index = default.index if default is not None else None
+            for dev in AudioManager.list_output_devices():
+                choices.append(
+                    SpeakerChoice(
+                        index=dev.index,
+                        name=dev.name,
+                        is_default=(dev.index == default_index),
+                    )
+                )
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Could not enumerate speakers", exc_info=True)
+        return choices
+
+    def get_selected_speaker(self) -> Optional[int]:
+        """Return the working-copy output-device index, or ``None`` for default."""
+        from mimosa.voice.audio_manager import AudioManager
+
+        return AudioManager.resolve_output_device_index(
+            self._working.voice.output_device
+        )
+
+    def set_speaker(self, index: Optional[int]) -> None:
+        """Select a speaker by device index (``None`` = system default).
+
+        Stores the choice as a string in ``voice.output_device`` (``""`` for the
+        system default) so it round-trips through the existing config schema and
+        the Settings dialog's speaker field.
+        """
+        value = "" if index is None else str(int(index))
+        self.set_value("voice", "output_device", value)
+
+    def test_speaker(self, seconds: float = 1.0) -> bool:
+        """Play a short chime through the selected speaker to confirm output.
+
+        Returns ``True`` if the chime played, or ``False`` if the audio backend
+        / device is unavailable (so the view can show a friendly "couldn't
+        access speaker" message instead of crashing).
+        """
+        from mimosa.voice.audio_manager import (
+            AudioManager,
+            AudioUnavailableError,
+        )
+
+        index = self.get_selected_speaker()
+        mgr = AudioManager(output_device=index)
+        try:
+            pcm, rate = self._build_chime(duration=seconds)
+            mgr.play(pcm, sample_rate=rate)
+            return True
+        except AudioUnavailableError:
+            logger.info("Speaker test requested but no audio backend available.")
+            return False
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Speaker test failed", exc_info=True)
+            return False
+        finally:
+            mgr.close()
+
+    @staticmethod
+    def _build_chime(duration: float = 1.0, sample_rate: int = 44100) -> Tuple[bytes, int]:
+        """Synthesize a pleasant two-note chime as 16-bit PCM bytes.
+
+        Pure-stdlib (math/struct) so it needs no extra dependencies. Returns
+        ``(pcm_bytes, sample_rate)`` suitable for :meth:`AudioManager.play`.
+        """
+        import math
+        import struct
+
+        duration = max(0.2, min(3.0, float(duration)))
+        # Two ascending notes (A5 then E6) with a short fade to avoid clicks.
+        notes = (880.0, 1318.5)
+        amplitude = 0.35 * 32767
+        samples = bytearray()
+        per_note = duration / len(notes)
+        note_frames = int(sample_rate * per_note)
+        fade = max(1, int(note_frames * 0.1))
+        for freq in notes:
+            for n in range(note_frames):
+                env = 1.0
+                if n < fade:
+                    env = n / fade
+                elif n > note_frames - fade:
+                    env = max(0.0, (note_frames - n) / fade)
+                value = int(amplitude * env * math.sin(2 * math.pi * freq * n / sample_rate))
+                samples += struct.pack("<h", value)
+        return bytes(samples), sample_rate
 
     # -- completion --------------------------------------------------------
 
