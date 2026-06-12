@@ -18,15 +18,19 @@ import random
 from typing import List, Optional
 
 from mimosa.llm.base_provider import LLMError, Message, Role
+from mimosa.llm.persona import build_system_prompt
 from mimosa.skills.base_skill import BaseSkill, SkillResult
 
-#: Personality/system prompt for greetings and chit-chat.
-GREETING_SYSTEM_PROMPT = (
-    "You are MimOSA, a warm, friendly, and concise local voice assistant. "
-    "The user is greeting you or making small talk. Respond in one short, "
-    "natural sentence suitable for being read aloud. Be personable but brief. "
-    "Do not use markdown or emoji."
+#: Task-specific guidance for greetings/chit-chat, layered on MimOSA's shared
+#: identity + natural tone (see :mod:`mimosa.llm.persona`).
+GREETING_TASK_INSTRUCTIONS = (
+    "The user is greeting you or making small talk. Reply in one short, natural "
+    "sentence, like a friend saying hi back. Be warm and personable but brief."
 )
+
+#: Full default greeting prompt (identity + tone + task), used when no
+#: personality settings are available.
+GREETING_SYSTEM_PROMPT = build_system_prompt(GREETING_TASK_INSTRUCTIONS)
 
 #: Local fallbacks used when the LLM is unavailable -- greetings must never fail.
 _FALLBACK_REPLIES = (
@@ -61,18 +65,11 @@ class GreetingSkill(BaseSkill):
         return random.choice(_FALLBACK_REPLIES)
 
     def _system_prompt(self) -> str:
-        p = self.personality
-        if p is None:
+        if self.personality is None:
             return GREETING_SYSTEM_PROMPT
-        extras = []
-        name = getattr(p, "assistant_name", "") or "MimOSA"
-        if name and name != "MimOSA":
-            extras.append(f"You are called {name}.")
-        if getattr(p, "user_name", ""):
-            extras.append(f"Address the user as {p.user_name} when natural.")
-        if not extras:
-            return GREETING_SYSTEM_PROMPT
-        return GREETING_SYSTEM_PROMPT + " " + " ".join(extras)
+        return build_system_prompt(
+            GREETING_TASK_INSTRUCTIONS, personality=self.personality
+        )
 
     def handle(self, text: str, context: Optional[List] = None) -> SkillResult:
         # No LLM configured -> use a friendly local fallback.

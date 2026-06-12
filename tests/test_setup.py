@@ -2,7 +2,7 @@
 
 These tests confirm that the project scaffold is correct and the LLM
 abstraction layer is wired up. They are deliberately fast and do **not**
-require network access or heavy optional dependencies (Whisper, Porcupine,
+require network access or heavy optional dependencies (Whisper, openWakeWord,
 PyAudio) -- those are checked separately by ``scripts/health_check.py``.
 
 Run with:

@@ -27,6 +27,7 @@ from mimosa.utils.config import (
     MAX_WAKE_SENSITIVITY,
     MIN_HISTORY_LIMIT,
     MIN_WAKE_SENSITIVITY,
+    VALID_GENDERS,
     VALID_VERBOSITY,
     WHISPER_MODELS,
 )
@@ -205,6 +206,11 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
             FieldSpec("personality", "verbosity", "How chatty should I be?",
                       "choice", choices=VALID_VERBOSITY,
                       help="'brief' = short answers, 'detailed' = more explanation."),
+            FieldSpec("personality", "gender", "Voice style",
+                      "choice", choices=VALID_GENDERS,
+                      help="Preferred voice/persona style for MimOSA. 'neutral' "
+                           "(default) leaves it unspecified; 'female'/'male' bias "
+                           "the spoken voice. Purely a presentation choice."),
             FieldSpec("personality", "greet_by_name", "Greet me by name",
                       "bool",
                       help="Say hello using your name when MimOSA starts."),

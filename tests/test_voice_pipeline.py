@@ -2,7 +2,7 @@
 
 These tests are written to pass on a **headless CI machine with no audio
 hardware and no heavy ML dependencies installed** (no PyAudio, Whisper, Piper,
-or Porcupine). Every external/optional backend is mocked, and we assert on the
+or openWakeWord). Every external/optional backend is mocked, and we assert on the
 graceful-degradation behavior that the privacy-focused, local-first design
 guarantees.
 
@@ -126,13 +126,26 @@ class TestAudioManager:
 # ---------------------------------------------------------------------------
 
 class TestWakeWord:
-    def test_factory_falls_back_to_energy(self):
-        # No Porcupine package/key on the VM -> must fall back, never raise.
+    def test_factory_returns_a_detector(self):
+        # The factory never raises just because a package/model is missing; it
+        # returns a usable backend (openWakeWord when available, else energy).
         detector = ww.create_wake_word_detector("hey mimosa")
-        assert isinstance(detector, ww.EnergyWakeWord)
+        assert isinstance(detector, ww.BaseWakeWord)
+        assert isinstance(detector, (ww.OpenWakeWord, ww.EnergyWakeWord))
 
     def test_factory_force_energy(self):
-        detector = ww.create_wake_word_detector("hey mimosa", prefer_porcupine=False)
+        # prefer_openwakeword=False forces the dependency-free energy fallback.
+        detector = ww.create_wake_word_detector("hey mimosa",
+                                                prefer_openwakeword=False)
+        assert isinstance(detector, ww.EnergyWakeWord)
+
+    def test_factory_falls_back_when_openwakeword_unavailable(self, monkeypatch):
+        # Simulate openWakeWord failing to initialise -> must fall back, never raise.
+        def _boom(*args, **kwargs):
+            raise ww.WakeWordError("simulated missing openwakeword")
+
+        monkeypatch.setattr(ww, "OpenWakeWord", _boom)
+        detector = ww.create_wake_word_detector("hey mimosa")
         assert isinstance(detector, ww.EnergyWakeWord)
 
     def test_energy_detector_attributes(self):
@@ -153,10 +166,56 @@ class TestWakeWord:
         triggered = any(detector.process(_loud(512, 12000)) for _ in range(10))
         assert triggered is True
 
-    def test_porcupine_missing_package_raises_wakeworderror(self):
-        # Direct construction (not the factory) surfaces the dependency error.
+    def test_openwakeword_resolves_builtin_model(self):
+        # Known phrases map to bundled models; unknown ones use the stand-in.
+        assert ww.OpenWakeWord._resolve_builtin_model("hey jarvis") == "hey_jarvis"
+        assert ww.OpenWakeWord._resolve_builtin_model("alexa") == "alexa"
+        assert (
+            ww.OpenWakeWord._resolve_builtin_model("hey mimosa")
+            == ww.OPENWAKEWORD_DEFAULT_MODEL
+        )
+
+    def test_openwakeword_missing_package_raises_wakeworderror(self, monkeypatch):
+        # Direct construction surfaces the dependency error when the package is
+        # unavailable (the factory swallows it; constructing directly does not).
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "openwakeword" or name.startswith("openwakeword."):
+                raise ImportError("simulated missing openwakeword")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _fake_import)
         with pytest.raises(ww.WakeWordError):
-            ww.PorcupineWakeWord(access_key="dummy", wake_word="jarvis")
+            ww.OpenWakeWord(wake_word="hey mimosa")
+
+    def test_openwakeword_detects_with_fake_engine(self, monkeypatch):
+        # Drive process() with a stub engine to verify thresholding without
+        # loading real ONNX models.
+        detector = ww.OpenWakeWord.__new__(ww.OpenWakeWord)  # bypass __init__
+        import numpy as np
+
+        detector._np = np
+        detector.threshold = 0.5
+        detector._model_key = "hey_jarvis"
+        detector.frame_length = ww.OpenWakeWord.FRAME_LENGTH
+        detector.sample_rate = ww.OpenWakeWord.SAMPLE_RATE
+
+        class _Engine:
+            def __init__(self):
+                self.score = 0.0
+
+            def predict(self, samples):
+                return {"hey_jarvis": self.score}
+
+        detector._engine = _Engine()
+        frame = _silence(ww.OpenWakeWord.FRAME_LENGTH)
+        detector._engine.score = 0.1
+        assert detector.process(frame) is False
+        detector._engine.score = 0.9
+        assert detector.process(frame) is True
 
 
 # ---------------------------------------------------------------------------

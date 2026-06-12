@@ -1,5 +1,45 @@
 # MimOSA Release Notes
 
+## v1.0.0-rc.2 — Release Candidate 2
+
+**Milestone 1** focuses on a fully key-free local wake word, a stronger sense of
+self, and a smoother install/setup experience. Everything remains privacy-first
+and local-first; no telemetry, no cloud requirement.
+
+### What's new
+
+- 🗣️ **openWakeWord** — Porcupine has been removed entirely. Wake-word detection
+  now runs on **openWakeWord**, which is 100% local and needs **no API key**.
+  The default wake phrase is still "hey mimosa". An energy-based fallback
+  remains for minimal environments.
+- 💾 **Reliable config saving** — `~/.config/mimosa/settings.json` is now always
+  written on first launch, even if you dismiss the setup wizard, so your
+  preferences persist correctly.
+- 🧡 **A real identity & natural tone** — MimOSA now knows exactly who she is
+  (your own local assistant, not a generic cloud model) and speaks like a warm,
+  thoughtful friend rather than reciting "This is MimOSA. The weather is 72
+  degrees." A single shared persona drives every LLM-backed reply.
+- 🧭 **`mimosa` on your PATH** — the installer now adds a `mimosa` launcher to
+  `~/.local/bin` (and updates your shell profile), so you can just type
+  `mimosa` from any terminal.
+- 🎚️ **Device pickers in Settings** — the microphone and speaker options are now
+  dropdowns of your actual detected devices instead of free-text fields.
+- 🧠 **Hardware capability detection** — at startup MimOSA silently checks
+  whether your machine could train a custom wake word on-device
+  (gpu / cpu / insufficient) and caches the result for a future milestone. This
+  is logging-only; nothing is shown or sent anywhere.
+- 🎙️ **Voice-style preference** — a new optional "voice style" choice
+  (neutral / female / male) in the setup wizard and Settings, biasing how
+  MimOSA presents. Defaults to neutral.
+
+### Upgrade notes
+
+- `pvporcupine` is no longer a dependency; `openwakeword` replaces it. Run
+  `pip install -r requirements.txt` (or re-run `install.sh`) to update.
+- No `PICOVOICE_ACCESS_KEY` / Porcupine key is needed anymore.
+
+---
+
 ## v1.0.0-rc.1 — Release Candidate 1
 
 **The first production-ready release candidate of MimOSA**, a privacy-first,

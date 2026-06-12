@@ -104,7 +104,26 @@ if HAS_GTK:
             actions.append(self._next_btn)
             root.append(actions)
 
+            # Bug #10: if the user dismisses the window (X button / Esc) without
+            # clicking Finish, still persist a config and mark first-run
+            # complete so ~/.config/mimosa/settings.json always exists and the
+            # wizard does not reappear on every launch.
+            self.connect("close-request", self._on_close_request)
+
             self._render()
+
+        def _on_close_request(self, *_args) -> bool:
+            if not self._controller.finished:
+                try:
+                    self._controller.cancel()  # marks first-run complete + saves
+                except Exception:
+                    logger.debug("Wizard cancel-on-close failed", exc_info=True)
+                if self._on_close is not None:
+                    try:
+                        self._on_close(False)
+                    except Exception:
+                        logger.debug("on_close hook failed", exc_info=True)
+            return False  # allow the window to close
 
         def _go(self, direction: int) -> None:
             self._commit_visible_fields()

@@ -131,6 +131,18 @@ MAX_PERSONALIZATION_LEN = 80
 VALID_VERBOSITY = ("brief", "balanced", "detailed")
 DEFAULT_VERBOSITY = "balanced"
 
+#: Voice "gender" preference for the assistant. This is a *presentation* choice
+#: that biases TTS voice selection and phrasing; it never gates functionality.
+#: ``"neutral"`` (the default) leaves MimOSA's voice/persona gender-unspecified.
+VALID_GENDERS = ("neutral", "female", "male")
+DEFAULT_GENDER = "neutral"
+
+#: Capability levels mirrored from
+#: :mod:`mimosa.system.capability_detector` so config validation has no heavy
+#: import dependency. Kept in sync with that module's ``LEVEL_*`` constants.
+VALID_CAPABILITY_LEVELS = ("gpu", "cpu", "insufficient", "unknown")
+DEFAULT_CAPABILITY_LEVEL = "unknown"
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
@@ -544,6 +556,10 @@ class PersonalitySettings:
     verbosity: str = DEFAULT_VERBOSITY
     #: When True, MimOSA greets the user by name on startup.
     greet_by_name: bool = True
+    #: Preferred voice/persona gender presentation for the assistant:
+    #: "neutral" | "female" | "male". Biases TTS voice selection and phrasing;
+    #: never gates functionality. Defaults to "neutral".
+    gender: str = DEFAULT_GENDER
 
     def _trim(self, value) -> str:
         try:
@@ -559,6 +575,8 @@ class PersonalitySettings:
         verbosity = self._trim(self.verbosity).lower()
         self.verbosity = verbosity if verbosity in VALID_VERBOSITY else DEFAULT_VERBOSITY
         self.greet_by_name = bool(self.greet_by_name)
+        gender = self._trim(self.gender).lower()
+        self.gender = gender if gender in VALID_GENDERS else DEFAULT_GENDER
         return self
 
     def display_user(self) -> str:
@@ -570,6 +588,71 @@ class PersonalitySettings:
         if self.greet_by_name and self.user_name:
             return f"Hi {self.user_name}, I'm {self.assistant_name}."
         return f"Hi, I'm {self.assistant_name}."
+
+
+@dataclass
+class HardwareSettings:
+    """Cached result of the on-device capability scan (Milestone 1, req #7).
+
+    A future milestone lets users *train their own wake word* locally. Training
+    is heavy, so at startup MimOSA silently probes the machine (see
+    :mod:`mimosa.system.capability_detector`) and caches the verdict here for
+    later use. This is informational only -- it never gates current features and
+    nothing is transmitted anywhere.
+    """
+
+    #: Overall verdict: "gpu" | "cpu" | "insufficient" | "unknown".
+    capability_level: str = DEFAULT_CAPABILITY_LEVEL
+    #: Total system RAM in GB (``None`` until first scan).
+    ram_gb: Optional[float] = None
+    #: Free disk space (GB) on the data volume at scan time.
+    disk_free_gb: Optional[float] = None
+    #: Logical CPU cores detected.
+    cpu_cores: Optional[int] = None
+    #: Whether a trainable GPU (CUDA/MPS/discrete) was found.
+    gpu_available: bool = False
+    #: Short GPU label: "cuda" | "mps" | "discrete" | "".
+    gpu_kind: str = ""
+    #: Whether a capability scan has ever been completed.
+    detected: bool = False
+
+    def validate(self) -> "HardwareSettings":
+        level = str(self.capability_level or "").strip().lower()
+        self.capability_level = (
+            level if level in VALID_CAPABILITY_LEVELS else DEFAULT_CAPABILITY_LEVEL
+        )
+        for attr in ("ram_gb", "disk_free_gb"):
+            value = getattr(self, attr)
+            if value is not None:
+                try:
+                    setattr(self, attr, round(float(value), 2))
+                except (TypeError, ValueError):
+                    setattr(self, attr, None)
+        if self.cpu_cores is not None:
+            try:
+                self.cpu_cores = int(self.cpu_cores)
+            except (TypeError, ValueError):
+                self.cpu_cores = None
+        self.gpu_available = bool(self.gpu_available)
+        self.gpu_kind = str(self.gpu_kind or "")
+        self.detected = bool(self.detected)
+        return self
+
+    def update_from_report(self, report) -> "HardwareSettings":
+        """Populate this section from a
+        :class:`~mimosa.system.capability_detector.CapabilityReport`."""
+        self.capability_level = getattr(report, "level", DEFAULT_CAPABILITY_LEVEL)
+        self.ram_gb = getattr(report, "ram_gb", None)
+        self.disk_free_gb = getattr(report, "disk_free_gb", None)
+        self.cpu_cores = getattr(report, "cpu_cores", None)
+        self.gpu_available = bool(getattr(report, "gpu_available", False))
+        self.gpu_kind = getattr(report, "gpu_kind", "") or ""
+        self.detected = True
+        return self.validate()
+
+    def can_train(self) -> bool:
+        """Whether the machine can realistically train a wake word on-device."""
+        return self.capability_level in ("gpu", "cpu")
 
 
 # ---------------------------------------------------------------------------
@@ -594,6 +677,7 @@ class AppConfig:
     research: ResearchSettings = field(default_factory=ResearchSettings)
     tasks: TasksSettings = field(default_factory=TasksSettings)
     personality: PersonalitySettings = field(default_factory=PersonalitySettings)
+    hardware: HardwareSettings = field(default_factory=HardwareSettings)
     ui: UIConfig = field(default_factory=UIConfig)
 
     def validate(self) -> "AppConfig":
@@ -609,6 +693,7 @@ class AppConfig:
         self.research.validate()
         self.tasks.validate()
         self.personality.validate()
+        self.hardware.validate()
         self.ui.validate()
         return self
 
@@ -623,6 +708,7 @@ class AppConfig:
             "research": asdict(self.research),
             "tasks": asdict(self.tasks),
             "personality": asdict(self.personality),
+            "hardware": asdict(self.hardware),
             "ui": self.ui.to_dict(),
         }
 
@@ -649,6 +735,7 @@ class AppConfig:
             research=_section(ResearchSettings, "research"),
             tasks=_section(TasksSettings, "tasks"),
             personality=_section(PersonalitySettings, "personality"),
+            hardware=_section(HardwareSettings, "hardware"),
             ui=UIConfig.from_dict(data.get("ui") or {}),
         )
         return cfg.validate()

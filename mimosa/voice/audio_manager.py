@@ -16,7 +16,7 @@ Design goals
   never leaves the machine. This upholds MimOSA's privacy principle.
 * **Simple format contract.** Audio is handled as 16-bit signed PCM
   (``paInt16``) mono at a configurable sample rate (default 16 kHz, which is
-  what both Whisper and Porcupine expect).
+  what both Whisper and openWakeWord expect).
 
 Typical usage::
 
@@ -92,7 +92,7 @@ class AudioManager:
 
     Args:
         sample_rate: Capture/playback sample rate in Hz. Defaults to 16000,
-            matching Whisper and Porcupine.
+            matching Whisper and openWakeWord.
         channels: Number of channels (1 = mono). Mono is recommended for STT.
         chunk_size: Frames per buffer for streaming reads.
         input_device: Preferred input device index, or ``None`` for the

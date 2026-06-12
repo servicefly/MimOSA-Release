@@ -1,3 +1,18 @@
+mimosa-assistant (1.0.0~rc2-1) unstable; urgency=medium
+
+  * Milestone 1: replaced Porcupine with openWakeWord for 100% local,
+    key-free wake-word detection.
+  * Fixed config persistence (settings.json always written on first run).
+  * Added a consistent MimOSA identity and a warm, natural conversational
+    tone across all LLM-backed skills.
+  * install.sh now installs a "mimosa" launcher on PATH (~/.local/bin).
+  * Settings: microphone/speaker pickers are now dropdowns of detected
+    devices instead of free-text fields.
+  * Added silent on-device hardware-capability detection (for future
+    on-device wake-word training) and a voice-style (gender) preference.
+
+ -- ServiceFly <info.markethiveapp@gmail.com>  Fri, 12 Jun 2026 12:00:00 +0000
+
 mimosa-assistant (1.0.0~rc1-1) unstable; urgency=medium
 
   * Initial Debian packaging for MimOSA 1.0.0 Release Candidate 1.

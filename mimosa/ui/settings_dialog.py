@@ -236,12 +236,65 @@ if HAS_GTK:
                     self._readers[key] = lambda w=spin: round(float(w.get_value()), 3)
                 return spin
 
+            if spec.kind in ("device_input", "device_output"):
+                return self._make_device_widget(spec, value)
+
             # text
             entry = Gtk.Entry()
             entry.set_text(str(value or ""))
             entry.connect("changed", lambda *_: self._on_field_changed())
             self._readers[key] = lambda w=entry: w.get_text()
             return entry
+
+        def _device_choices(self, kind: str):
+            """Return ``[(label, stored_value), ...]`` for an audio-device field.
+
+            The first entry is always the system default (stored as ``""``);
+            the rest are enumerated devices keyed by their PyAudio index (stored
+            as the string index, matching the existing config schema and the
+            setup wizard). Never raises -- degrades to just the default entry
+            when no audio backend is available.
+            """
+            from mimosa.voice.audio_manager import AudioManager
+
+            is_input = kind == "device_input"
+            label = "microphone" if is_input else "speaker"
+            choices = [(f"System default {label}", "")]
+            try:
+                if is_input:
+                    default = AudioManager.get_default_input_device()
+                    devices = AudioManager.list_input_devices()
+                else:
+                    default = AudioManager.get_default_output_device()
+                    devices = AudioManager.list_output_devices()
+                default_index = default.index if default is not None else None
+                for dev in devices:
+                    name = dev.name
+                    if dev.index == default_index:
+                        name = f"{name} (Default)"
+                    choices.append((name, str(dev.index)))
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Could not enumerate %s devices", label, exc_info=True)
+            return choices
+
+        def _make_device_widget(self, spec: "FieldSpec", value: Any) -> "Gtk.Widget":
+            key = (spec.section, spec.name)
+            choices = self._device_choices(spec.kind)
+            labels = [c[0] for c in choices]
+            values = [c[1] for c in choices]
+            combo = Gtk.DropDown.new_from_strings(labels)
+
+            # Select the entry matching the stored value (normalise to string).
+            current = "" if value is None else str(value)
+            try:
+                combo.set_selected(values.index(current))
+            except ValueError:
+                combo.set_selected(0)  # fall back to system default
+            combo.connect("notify::selected", lambda *_: self._on_field_changed())
+            self._readers[key] = lambda w=combo, v=values: (
+                v[w.get_selected()] if 0 <= w.get_selected() < len(v) else ""
+            )
+            return combo
 
         # -- skills page ---------------------------------------------------
 
@@ -379,7 +432,7 @@ if HAS_GTK:
                 box.append(sysl)
 
             credits = Gtk.Label(
-                label="Built with GTK4, Whisper, Piper, Porcupine, and Abacus.AI.",
+                label="Built with GTK4, Whisper, Piper, openWakeWord, and Abacus.AI.",
                 xalign=0.0)
             credits.add_css_class("dim-label")
             credits.set_wrap(True)

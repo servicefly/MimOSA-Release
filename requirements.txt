@@ -17,7 +17,10 @@ requests>=2.31,<3.0            # HTTP client for Abacus.AI RouteLLM calls
 python-dotenv>=1.0,<2.0        # Load configuration from .env files
 
 # --- Voice: wake word ---
-pvporcupine>=3.0,<4.0          # Porcupine wake-word detection
+# openWakeWord is 100% local and free -- no API key or account required.
+# Small ONNX/TFLite models run on the CPU; they download once (a few MB) and
+# are cached locally. Nothing is sent off-device at runtime.
+openwakeword>=0.6,<0.7         # Local, key-free wake-word detection
 
 # --- Voice: speech-to-text (local) ---
 openai-whisper>=20231117       # Local STT (no cloud dependency)

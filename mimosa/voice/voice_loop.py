@@ -9,7 +9,7 @@ This module orchestrates the full **local-first** voice interaction cycle:
 
 Concretely, one turn is:
 
-1. **IDLE** -- wait for the wake word (Porcupine or the energy fallback).
+1. **IDLE** -- wait for the wake word (openWakeWord or the energy fallback).
 2. **LISTENING** -- record the user's utterance until they stop talking
    (:meth:`AudioManager.record_until_silence`).
 3. **PROCESSING** -- transcribe locally with Whisper, then route the text. As

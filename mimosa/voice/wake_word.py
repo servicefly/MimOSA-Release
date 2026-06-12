@@ -1,23 +1,25 @@
 """Wake-word detection for MimOSA.
 
 The wake word ("Hey MimOSA" by default) is what takes MimOSA from a low-power
-idle state into active listening. Detection runs **entirely on-device**.
+idle state into active listening. Detection runs **entirely on-device** with no
+API keys, accounts, or network calls required at runtime.
 
 Two backends are provided behind a common :class:`BaseWakeWord` interface:
 
-* :class:`PorcupineWakeWord` -- accurate, low-CPU keyword spotting using
-  `Picovoice Porcupine <https://picovoice.ai/platform/porcupine/>`_. Requires
-  the ``pvporcupine`` package and a free access key. This is the recommended
-  backend.
+* :class:`OpenWakeWord` -- accurate, low-CPU keyword spotting using
+  `openWakeWord <https://github.com/dscripka/openWakeWord>`_. It is 100% local
+  and free: small ONNX/TFLite models run on the CPU, no key needed. This is the
+  recommended backend. Until a custom "Hey MimOSA" model is trained, a bundled
+  pre-trained model is used as a close stand-in (see
+  :data:`OPENWAKEWORD_DEFAULT_MODEL`).
 * :class:`EnergyWakeWord` -- a dependency-free fallback that triggers on a
   sustained burst of audio energy (voice activity). It is **not** true keyword
   spotting -- it cannot tell *what* you said -- but it keeps the pipeline
-  usable for local testing when Porcupine isn't configured, and in headless/CI
-  environments. Limitations are documented on the class.
+  usable in headless/CI environments and when openWakeWord cannot load.
 
 Use :func:`create_wake_word_detector` to get the best available backend based
 on configuration; it falls back automatically and never raises just because a
-key or package is missing.
+package or model is missing.
 
 Each detector consumes fixed-size frames of 16-bit PCM mono audio via
 :meth:`BaseWakeWord.process`, returning ``True`` on the frame where the wake
@@ -34,22 +36,32 @@ from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Default human-readable wake phrase. Porcupine maps this to a built-in
-#: keyword where possible; otherwise the closest built-in is used.
+#: Default human-readable wake phrase.
 DEFAULT_WAKE_WORD = "hey mimosa"
 
-#: Porcupine built-in keywords that ship with the library (no custom model
-#: file needed). "mimosa" is not built in, so we map to a close stand-in.
-PORCUPINE_BUILTIN_KEYWORDS = {
-    "porcupine", "bumblebee", "alexa", "computer", "jarvis", "hey google",
-    "hey siri", "ok google", "picovoice", "blueberry", "grapefruit",
-    "grasshopper", "terminator",
+#: openWakeWord ships several free, pre-trained models (no key needed):
+#: ``alexa``, ``hey_mycroft``, ``hey_jarvis``, ``hey_rhasspy``, ``timer`` and
+#: ``weather``. "mimosa" is not yet a bundled model, so we map known phrases to
+#: the closest pre-trained stand-in. A future milestone lets users train a real
+#: "Hey MimOSA" model and drop it in via ``model_path``.
+OPENWAKEWORD_BUILTIN_MODELS = {
+    "alexa": "alexa",
+    "hey mycroft": "hey_mycroft",
+    "hey_mycroft": "hey_mycroft",
+    "hey jarvis": "hey_jarvis",
+    "hey_jarvis": "hey_jarvis",
+    "hey rhasspy": "hey_rhasspy",
+    "hey_rhasspy": "hey_rhasspy",
 }
 
-#: Fallback built-in keyword used when the requested phrase has no built-in
-#: Porcupine model (e.g. "hey mimosa"). Users wanting the real phrase can
-#: supply a custom ``.ppn`` keyword file via ``keyword_paths``.
-PORCUPINE_FALLBACK_KEYWORD = "jarvis"
+#: Stand-in pre-trained model used when the requested phrase has no bundled
+#: openWakeWord model (e.g. "hey mimosa"). Users wanting the exact phrase can
+#: train a custom model and supply its path via ``model_path``.
+OPENWAKEWORD_DEFAULT_MODEL = "hey_jarvis"
+
+#: Default detection threshold in ``[0, 1]``; higher = stricter (fewer false
+#: positives, more missed wakes).
+DEFAULT_OPENWAKEWORD_THRESHOLD = 0.5
 
 
 class WakeWordError(RuntimeError):
@@ -135,107 +147,139 @@ class BaseWakeWord(abc.ABC):
         return f"{type(self).__name__}(wake_word={self.wake_word!r})"
 
 
-class PorcupineWakeWord(BaseWakeWord):
-    """Porcupine-based wake-word detector (recommended, low CPU).
+class OpenWakeWord(BaseWakeWord):
+    """openWakeWord-based detector (recommended, 100% local, no API key).
+
+    openWakeWord runs small ONNX/TFLite models on the CPU. The models are
+    downloaded once (a few MB) and cached locally; nothing is sent anywhere at
+    runtime.
 
     Args:
-        access_key: Picovoice access key. Falls back to the
-            ``PORCUPINE_ACCESS_KEY`` env var.
-        wake_word: Desired wake phrase. If it matches a Porcupine built-in
-            keyword it is used directly; otherwise a built-in stand-in
-            (:data:`PORCUPINE_FALLBACK_KEYWORD`) is used unless ``keyword_paths``
+        wake_word: Desired wake phrase. If it matches a bundled openWakeWord
+            model it is used directly; otherwise a pre-trained stand-in
+            (:data:`OPENWAKEWORD_DEFAULT_MODEL`) is used unless ``model_path``
             is given.
-        keyword_paths: Optional list of custom ``.ppn`` keyword model paths
-            (use this for a true "Hey MimOSA" model).
-        sensitivity: Detection sensitivity in ``[0, 1]``; higher = more
-            sensitive (more true hits, more false positives).
+        model_path: Optional path to a custom ``.onnx``/``.tflite`` wake-word
+            model (use this for a true "Hey MimOSA" model).
+        threshold: Detection threshold in ``[0, 1]``; higher = stricter.
+        inference_framework: ``"onnx"`` or ``"tflite"``; defaults to whichever
+            openWakeWord prefers.
 
     Raises:
-        WakeWordError: If ``pvporcupine`` is unavailable or initialization
-            fails (e.g. missing/invalid access key).
+        WakeWordError: If ``openwakeword`` is unavailable or initialization
+            fails (e.g. models cannot be downloaded/loaded).
     """
 
-    name = "porcupine"
+    name = "openwakeword"
+
+    #: openWakeWord requires 16 kHz mono audio fed in 80 ms (1280-sample) chunks.
+    SAMPLE_RATE = 16000
+    FRAME_LENGTH = 1280
 
     def __init__(
         self,
-        access_key: Optional[str] = None,
         wake_word: str = DEFAULT_WAKE_WORD,
-        keyword_paths: Optional[list] = None,
-        sensitivity: float = 0.5,
+        model_path: Optional[str] = None,
+        threshold: float = DEFAULT_OPENWAKEWORD_THRESHOLD,
+        inference_framework: Optional[str] = None,
     ) -> None:
         try:
-            import pvporcupine
+            import numpy as np
+            from openwakeword.model import Model
         except Exception as exc:  # ImportError or load failure
             raise WakeWordError(
-                "pvporcupine is not installed. Run `pip install pvporcupine` "
+                "openwakeword is not installed. Run `pip install openwakeword` "
                 "or use the energy-based fallback."
             ) from exc
 
-        key = access_key or os.getenv("PORCUPINE_ACCESS_KEY")
-        if not key:
-            raise WakeWordError(
-                "No Porcupine access key. Set PORCUPINE_ACCESS_KEY (free key "
-                "from https://console.picovoice.ai/) or use the fallback."
-            )
+        self._np = np
+        self.threshold = max(0.0, min(1.0, float(threshold)))
+
+        # Resolve which model(s) to load.
+        model_path = model_path or os.getenv("MIMOSA_WAKEWORD_MODEL")
+        kwargs = {}
+        if inference_framework:
+            kwargs["inference_framework"] = inference_framework
 
         try:
-            if keyword_paths:
-                self._engine = pvporcupine.create(
-                    access_key=key,
-                    keyword_paths=keyword_paths,
-                    sensitivities=[sensitivity] * len(keyword_paths),
-                )
+            if model_path:
+                self._engine = Model(wakeword_models=[model_path], **kwargs)
+                self._model_key = None  # match on any/all loaded models
             else:
-                keyword = self._resolve_builtin_keyword(wake_word)
-                self._engine = pvporcupine.create(
-                    access_key=key,
-                    keywords=[keyword],
-                    sensitivities=[sensitivity],
-                )
+                model_name = self._resolve_builtin_model(wake_word)
+                # Ensure the bundled pre-trained models are present locally
+                # (best-effort; a fresh install downloads a few MB once).
+                self._ensure_models_downloaded()
+                self._engine = Model(wakeword_models=[model_name], **kwargs)
+                self._model_key = model_name
+        except WakeWordError:
+            raise
         except Exception as exc:
-            raise WakeWordError(f"Failed to initialize Porcupine: {exc}") from exc
+            raise WakeWordError(f"Failed to initialize openWakeWord: {exc}") from exc
 
         super().__init__(
             wake_word=wake_word,
-            frame_length=self._engine.frame_length,
-            sample_rate=self._engine.sample_rate,
+            frame_length=self.FRAME_LENGTH,
+            sample_rate=self.SAMPLE_RATE,
         )
 
     @staticmethod
-    def _resolve_builtin_keyword(wake_word: str) -> str:
-        """Map a requested phrase to a Porcupine built-in keyword.
+    def _ensure_models_downloaded() -> None:
+        """Best-effort download of bundled openWakeWord models."""
+        try:
+            from openwakeword.utils import download_models
 
-        "Hey MimOSA" has no built-in model, so we fall back to a close
-        built-in keyword and log a hint about supplying a custom ``.ppn``.
+            download_models()
+        except Exception:  # pragma: no cover - offline / already present
+            logger.debug("openWakeWord model download skipped", exc_info=True)
+
+    @staticmethod
+    def _resolve_builtin_model(wake_word: str) -> str:
+        """Map a requested phrase to a bundled openWakeWord model name.
+
+        "Hey MimOSA" has no bundled model, so we fall back to a close
+        pre-trained model and log a hint about training a custom one.
         """
-        normalized = wake_word.strip().lower()
-        if normalized in PORCUPINE_BUILTIN_KEYWORDS:
-            return normalized
+        normalized = (wake_word or "").strip().lower()
+        if normalized in OPENWAKEWORD_BUILTIN_MODELS:
+            return OPENWAKEWORD_BUILTIN_MODELS[normalized]
         logger.warning(
-            "Wake word %r has no built-in Porcupine model; using %r instead. "
-            "Provide a custom .ppn via keyword_paths for the exact phrase.",
+            "Wake word %r has no bundled openWakeWord model; using %r as a "
+            "stand-in. Train a custom model and pass model_path for the exact "
+            "phrase.",
             wake_word,
-            PORCUPINE_FALLBACK_KEYWORD,
+            OPENWAKEWORD_DEFAULT_MODEL,
         )
-        return PORCUPINE_FALLBACK_KEYWORD
+        return OPENWAKEWORD_DEFAULT_MODEL
 
     def process(self, pcm_frame: bytes) -> bool:
-        """Return ``True`` if Porcupine detects the keyword in this frame."""
-        import struct
-
+        """Return ``True`` if openWakeWord detects the keyword in this frame."""
         num_samples = len(pcm_frame) // 2
         if num_samples == 0:
             return False
-        samples = struct.unpack(f"<{num_samples}h", pcm_frame[: num_samples * 2])
-        return self._engine.process(samples) >= 0
+        samples = self._np.frombuffer(
+            pcm_frame[: num_samples * 2], dtype=self._np.int16
+        )
+        try:
+            scores = self._engine.predict(samples)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("openWakeWord predict failed", exc_info=True)
+            return False
+        if not scores:
+            return False
+        if self._model_key is not None and self._model_key in scores:
+            return float(scores[self._model_key]) >= self.threshold
+        # Custom model / unknown key: trigger if any score crosses the threshold.
+        return any(float(v) >= self.threshold for v in scores.values())
 
     def delete(self) -> None:
-        """Release the Porcupine engine."""
+        """Release the openWakeWord engine and reset model state."""
         engine = getattr(self, "_engine", None)
         if engine is not None:
             try:
-                engine.delete()
+                reset = getattr(engine, "reset", None)
+                if callable(reset):
+                    reset()
             except Exception:  # pragma: no cover - defensive
                 pass
 
@@ -248,8 +292,8 @@ class EnergyWakeWord(BaseWakeWord):
         louder than ``threshold`` for ``trigger_frames`` consecutive frames --
         it cannot distinguish "Hey MimOSA" from other speech or noise. It
         exists so the pipeline remains usable for local testing and in
-        environments where Porcupine is not configured. Prefer
-        :class:`PorcupineWakeWord` for real use.
+        environments where openWakeWord cannot load. Prefer
+        :class:`OpenWakeWord` for real use.
 
     Args:
         wake_word: Informational label for the configured phrase.
@@ -293,42 +337,38 @@ class EnergyWakeWord(BaseWakeWord):
 def create_wake_word_detector(
     wake_word: str = DEFAULT_WAKE_WORD,
     *,
-    access_key: Optional[str] = None,
-    keyword_paths: Optional[list] = None,
-    sensitivity: float = 0.5,
-    prefer_porcupine: bool = True,
+    model_path: Optional[str] = None,
+    threshold: float = DEFAULT_OPENWAKEWORD_THRESHOLD,
+    prefer_openwakeword: bool = True,
 ) -> BaseWakeWord:
     """Return the best available wake-word backend.
 
-    Tries Porcupine first (when ``prefer_porcupine`` and a key/package are
+    Tries openWakeWord first (when ``prefer_openwakeword`` and the package are
     available) and transparently falls back to :class:`EnergyWakeWord` if
-    Porcupine cannot be initialized. Never raises due to a missing key or
-    package -- it logs and falls back instead.
+    openWakeWord cannot be initialized. Never raises due to a missing package or
+    model -- it logs and falls back instead.
 
     Args:
         wake_word: Desired wake phrase (default ``"hey mimosa"``).
-        access_key: Picovoice key; falls back to ``PORCUPINE_ACCESS_KEY`` env.
-        keyword_paths: Optional custom ``.ppn`` model paths for the exact
-            phrase.
-        sensitivity: Porcupine sensitivity in ``[0, 1]``.
-        prefer_porcupine: Set ``False`` to force the energy fallback.
+        model_path: Optional custom model path for the exact phrase.
+        threshold: openWakeWord detection threshold in ``[0, 1]``.
+        prefer_openwakeword: Set ``False`` to force the energy fallback.
 
     Returns:
         A ready-to-use :class:`BaseWakeWord` instance.
     """
-    if prefer_porcupine:
+    if prefer_openwakeword:
         try:
-            detector = PorcupineWakeWord(
-                access_key=access_key,
+            detector = OpenWakeWord(
                 wake_word=wake_word,
-                keyword_paths=keyword_paths,
-                sensitivity=sensitivity,
+                model_path=model_path,
+                threshold=threshold,
             )
-            logger.info("Using Porcupine wake-word backend.")
+            logger.info("Using openWakeWord wake-word backend (local, no key).")
             return detector
         except WakeWordError as exc:
             logger.warning(
-                "Porcupine unavailable (%s). Falling back to energy-based "
+                "openWakeWord unavailable (%s). Falling back to energy-based "
                 "detection. Wake-word accuracy will be limited.",
                 exc,
             )

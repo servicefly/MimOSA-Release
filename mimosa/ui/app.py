@@ -60,6 +60,18 @@ class MimOSAApplication:
         self.config_manager = config_manager or AppConfigManager()
         if config_manager is None:
             self.config_manager.load()
+            # Bug #10: guarantee the config file exists on disk after the very
+            # first launch (so ~/.config/mimosa/settings.json is always present,
+            # even if the user never opens the wizard or settings).
+            try:
+                if not self.config_manager.path.exists():
+                    self.config_manager.save()
+            except Exception:  # pragma: no cover - defensive, never fatal
+                logger.debug("Initial config persist failed", exc_info=True)
+            # Milestone 1 (req #7): silently probe the host's capability for
+            # future on-device wake-word training and cache the verdict in
+            # config. Best-effort and logging-only -- no UI, never fatal.
+            self._detect_hardware_capability()
         self.config = config or self.config_manager.get().ui
         self.force_headless = force_headless
         self.bridge: Optional[StateBridge] = None
@@ -75,6 +87,34 @@ class MimOSAApplication:
         from mimosa.ui.expressions import ExpressionController
 
         self.expressions = ExpressionController()
+
+    # -- hardware capability (M1, req #7) ----------------------------------
+
+    def _detect_hardware_capability(self) -> None:
+        """Silently scan the host and cache the capability verdict in config.
+
+        Runs once at startup. A future milestone will let users train their own
+        wake word on-device; this records whether the machine can handle it
+        (gpu/cpu/insufficient). Logging-only -- no UI is shown. Any failure is
+        swallowed so it can never block launch.
+        """
+        try:
+            from mimosa.system.capability_detector import detect_capability
+
+            report = detect_capability()
+            cfg = self.config_manager.get()
+            cfg.hardware.update_from_report(report)
+            # Persist quietly so the verdict survives restarts. Best-effort.
+            try:
+                self.config_manager.save()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("Could not persist hardware capability", exc_info=True)
+            logger.info(
+                "Hardware capability for on-device training: %s",
+                cfg.hardware.capability_level,
+            )
+        except Exception:  # pragma: no cover - never fatal
+            logger.debug("Hardware capability detection failed", exc_info=True)
 
     # -- voice loop --------------------------------------------------------
 
@@ -412,7 +452,7 @@ class MimOSAApplication:
             try:
                 from mimosa import __version__ as version
             except Exception:
-                version = "1.0.0-rc.1"
+                version = "1.0.0-rc.2"
 
             dialog = Gtk.AboutDialog()
             if transient_for is not None:

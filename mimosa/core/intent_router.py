@@ -349,7 +349,7 @@ class IntentRouter:
                 GreetingSkill(llm_provider=llm_provider, personality=personality),
                 ResearchSkill(llm_provider=llm_provider),
                 TaskControlSkill(),
-                QuestionSkill(llm_provider=llm_provider),
+                QuestionSkill(llm_provider=llm_provider, personality=personality),
             ]
         self._skills: List[BaseSkill] = []
         self._by_intent: Dict[str, BaseSkill] = {}

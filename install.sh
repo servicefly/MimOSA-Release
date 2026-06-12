@@ -143,17 +143,76 @@ DESKTOP
 }
 install_desktop_integration || echo "WARNING: desktop integration step failed (non-fatal)." >&2
 
+# --- 3c. Global PATH access (Bug #12) -------------------------------------
+# The `mimosa` launcher lives inside the virtualenv's bin/ dir, which is only
+# on PATH while the venv is activated. To let users run `mimosa` from anywhere
+# without activating the venv, symlink it into ~/.local/bin (the standard XDG
+# per-user bin dir) and make sure that dir is on PATH for future shells.
+PATH_HINT=""
+install_path_launcher() {
+    local bin_dir="$HOME/.local/bin"
+    local mimosa_bin="$VENV_DIR/bin/mimosa"
+    case "$mimosa_bin" in
+        /*) : ;;
+        *)  mimosa_bin="$SCRIPT_DIR/$mimosa_bin" ;;
+    esac
+
+    if [[ ! -x "$mimosa_bin" ]]; then
+        echo "WARNING: $mimosa_bin not found; skipping PATH setup." >&2
+        return 0
+    fi
+
+    mkdir -p "$bin_dir"
+    ln -sf "$mimosa_bin" "$bin_dir/mimosa"
+    echo ">> Linked 'mimosa' into $bin_dir"
+
+    # Ensure ~/.local/bin is on PATH. If it already is, nothing to do.
+    case ":$PATH:" in
+        *":$bin_dir:"*) return 0 ;;
+    esac
+
+    # Append a PATH export to the user's shell rc files (idempotent).
+    local added=0 rc line
+    line='export PATH="$HOME/.local/bin:$PATH"'
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+        [[ -f "$rc" ]] || continue
+        if ! grep -qsF "$line" "$rc"; then
+            {
+                echo ""
+                echo "# Added by MimOSA installer so 'mimosa' is on PATH"
+                echo "$line"
+            } >> "$rc"
+            added=1
+        fi
+    done
+    # Always make sure at least ~/.profile carries it (login shells).
+    if [[ $added -eq 0 && ! -f "$HOME/.bashrc" && ! -f "$HOME/.zshrc" ]]; then
+        {
+            echo ""
+            echo "# Added by MimOSA installer so 'mimosa' is on PATH"
+            echo "$line"
+        } >> "$HOME/.profile"
+    fi
+    PATH_HINT="$bin_dir was added to your PATH. Open a new terminal (or run \
+'source ~/.bashrc') before using the 'mimosa' command."
+}
+install_path_launcher || echo "WARNING: PATH setup step failed (non-fatal)." >&2
+
 # --- 4. Done --------------------------------------------------------------
 cat <<EOF
 
 ============================================================================
- MimOSA installed successfully (release candidate 1.0.0rc1).
+ MimOSA installed successfully (release candidate 1.0.0rc2).
 
- To start MimOSA:
-     source $VENV_DIR/bin/activate
+ To start MimOSA (from any directory -- it's on your PATH now):
      mimosa                # GUI avatar if GTK is available, else headless
      mimosa --no-gui       # force headless (voice/CLI only)
      mimosa --check        # print environment + log-file readiness
+     mimosa --check-audio  # test your microphone
+
+ ${PATH_HINT:-The 'mimosa' command is available in this shell.}
+
+ (You can also still run it via: source $VENV_DIR/bin/activate && mimosa)
 
  First launch runs the "Get to Know MimOSA" setup wizard.
 

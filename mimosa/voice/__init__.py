@@ -3,8 +3,8 @@
 Handles the full local voice stack so that audio never has to leave the
 machine:
 
-* **Wake word detection** -- Porcupine (``pvporcupine``) continuously monitors
-  the microphone for the configured wake word.
+* **Wake word detection** -- openWakeWord continuously monitors the microphone
+  for the configured wake word, fully on-device with no API key.
 * **Speech-to-Text (STT)** -- OpenAI Whisper runs locally to transcribe user
   speech to text.
 * **Text-to-Speech (TTS)** -- Piper TTS synthesizes natural-sounding speech
@@ -17,7 +17,7 @@ Modules:
 
 * :mod:`mimosa.voice.audio_manager` -- microphone capture / playback, device
   enumeration, and silence detection (lazy PyAudio backend).
-* :mod:`mimosa.voice.wake_word` -- Porcupine detector with a dependency-free
+* :mod:`mimosa.voice.wake_word` -- openWakeWord detector with a dependency-free
   energy-based fallback, plus a graceful factory.
 * :mod:`mimosa.voice.stt` -- local Whisper speech-to-text.
 * :mod:`mimosa.voice.tts` -- local Piper text-to-speech.

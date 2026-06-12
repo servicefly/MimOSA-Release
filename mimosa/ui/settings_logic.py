@@ -37,6 +37,7 @@ from mimosa.utils.config import (
     MIN_TTS_SPEED,
     MIN_WAKE_SENSITIVITY,
     RESEARCH_BACKENDS,
+    VALID_GENDERS,
     VALID_VERBOSITY,
     WHISPER_MODELS,
 )
@@ -121,11 +122,15 @@ def build_page_specs() -> Tuple[PageSpec, ...]:
                       help="Piper voice id (blank = engine default)."),
             FieldSpec("voice", "tts_speed", "Speech speed", "float",
                       minimum=MIN_TTS_SPEED, maximum=MAX_TTS_SPEED, step=0.1),
-            FieldSpec("voice", "input_device", "Microphone (input)", "text",
-                      help="Audio input device (blank = system default).",
+            FieldSpec("voice", "input_device", "Microphone (input)",
+                      "device_input",
+                      help="Pick the microphone MimOSA listens with "
+                           "(system default if unsure).",
                       restart=True),
-            FieldSpec("voice", "output_device", "Speaker (output)", "text",
-                      help="Audio output device (blank = system default).",
+            FieldSpec("voice", "output_device", "Speaker (output)",
+                      "device_output",
+                      help="Pick the speaker MimOSA talks through "
+                           "(system default if unsure).",
                       restart=True),
         ),
     )
@@ -202,6 +207,10 @@ def build_page_specs() -> Tuple[PageSpec, ...]:
             FieldSpec("personality", "verbosity", "Response style", "choice",
                       choices=VALID_VERBOSITY,
                       help="How chatty MimOSA should be."),
+            FieldSpec("personality", "gender", "Voice style", "choice",
+                      choices=VALID_GENDERS,
+                      help="Preferred voice/persona style. 'neutral' leaves it "
+                           "unspecified; 'female'/'male' bias the spoken voice."),
             FieldSpec("personality", "greet_by_name", "Greet me by name", "bool",
                       help="Say hello using your name when MimOSA starts."),
         ),

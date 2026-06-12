@@ -435,3 +435,114 @@ def test_personality_greeting_variants():
     assert p.greeting() == "Hi, I'm Nova."
     p2 = PersonalitySettings().validate()
     assert p2.display_user() == "there"
+
+
+# ---------------------------------------------------------------------------
+# Gender / voice-style preference (Milestone 1, req #8)
+# ---------------------------------------------------------------------------
+
+def test_personality_gender_defaults_neutral():
+    cfg = AppConfig()
+    assert cfg.personality.gender == "neutral"
+
+
+def test_personality_gender_validates():
+    from mimosa.utils.config import PersonalitySettings
+
+    assert PersonalitySettings(gender="FEMALE").validate().gender == "female"
+    assert PersonalitySettings(gender="  Male ").validate().gender == "male"
+    assert PersonalitySettings(gender="banana").validate().gender == "neutral"
+    assert PersonalitySettings(gender="").validate().gender == "neutral"
+
+
+def test_personality_gender_round_trip():
+    cfg = AppConfig()
+    cfg.personality.gender = "female"
+    cfg.validate()
+    data = cfg.to_dict()
+    restored = AppConfig.from_dict(data)
+    assert restored.personality.gender == "female"
+    assert restored.to_dict() == data
+
+
+def test_personality_old_payload_gets_default_gender():
+    cfg = AppConfig.from_dict({"version": 1, "personality": {"user_name": "Sam"}})
+    assert cfg.personality.gender == "neutral"
+
+
+# ---------------------------------------------------------------------------
+# HardwareSettings / capability detection (Milestone 1, req #7)
+# ---------------------------------------------------------------------------
+
+def test_hardware_defaults():
+    cfg = AppConfig()
+    assert cfg.hardware.capability_level == "unknown"
+    assert cfg.hardware.detected is False
+    assert cfg.hardware.gpu_available is False
+
+
+def test_hardware_validate_coerces():
+    from mimosa.utils.config import HardwareSettings
+
+    hw = HardwareSettings(
+        capability_level="GPU",
+        ram_gb="16",
+        disk_free_gb="100",
+        cpu_cores="8",
+        gpu_available=1,
+        gpu_kind=None,
+        detected=1,
+    ).validate()
+    assert hw.capability_level == "gpu"
+    assert hw.ram_gb == 16.0
+    assert hw.cpu_cores == 8
+    assert hw.gpu_available is True
+    assert hw.gpu_kind == ""
+    assert hw.detected is True
+
+
+def test_hardware_invalid_level_defaults_unknown():
+    from mimosa.utils.config import HardwareSettings
+
+    assert HardwareSettings(capability_level="bogus").validate().capability_level == "unknown"
+
+
+def test_hardware_update_from_report():
+    from mimosa.utils.config import HardwareSettings
+    from mimosa.system.capability_detector import CapabilityReport
+
+    report = CapabilityReport(
+        level="cpu", ram_gb=8.0, disk_free_gb=50.0, cpu_cores=4,
+        gpu_available=False, gpu_kind="",
+    )
+    hw = HardwareSettings().update_from_report(report)
+    assert hw.capability_level == "cpu"
+    assert hw.detected is True
+    assert hw.can_train() is True
+
+
+def test_hardware_can_train_false_when_insufficient():
+    from mimosa.utils.config import HardwareSettings
+
+    hw = HardwareSettings(capability_level="insufficient").validate()
+    assert hw.can_train() is False
+
+
+def test_hardware_round_trip():
+    cfg = AppConfig()
+    cfg.hardware.capability_level = "gpu"
+    cfg.hardware.gpu_available = True
+    cfg.hardware.gpu_kind = "cuda"
+    cfg.hardware.detected = True
+    cfg.validate()
+    data = cfg.to_dict()
+    restored = AppConfig.from_dict(data)
+    assert restored.hardware.capability_level == "gpu"
+    assert restored.hardware.gpu_kind == "cuda"
+    assert restored.to_dict() == data
+
+
+def test_appconfig_old_payload_without_hardware_gets_defaults():
+    cfg = AppConfig.from_dict({"version": 1, "voice": {}})
+    assert cfg.hardware.capability_level == "unknown"
+    assert cfg.hardware.detected is False
