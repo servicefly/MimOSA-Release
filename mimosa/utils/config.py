@@ -74,6 +74,15 @@ DEFAULT_TTS_SPEED = 1.0
 
 DEFAULT_WAKE_WORD = "hey mimosa"
 
+#: Custom wake-word *training* preference (Milestone 2). Decides what happens
+#: after the setup wizard for users who want a personalised wake word:
+#:   * ``"mimosa"``  -> keep the built-in "Hey MimOSA" default (no training).
+#:   * ``"now"``     -> train the custom wake word immediately after setup.
+#:   * ``"later"``   -> remember the intent; Settings shows "Train custom wake
+#:                      word" so it can be done whenever the user is ready.
+VALID_TRAINING_PREFERENCES = ("mimosa", "now", "later")
+DEFAULT_TRAINING_PREFERENCE = "mimosa"
+
 #: Conversation-history bounds.
 MIN_HISTORY_LIMIT = 1
 MAX_HISTORY_LIMIT = 500
@@ -137,6 +146,24 @@ DEFAULT_VERBOSITY = "balanced"
 VALID_GENDERS = ("neutral", "female", "male")
 DEFAULT_GENDER = "neutral"
 
+#: How the user wants to handle the conversational "get to know you" onboarding
+#: (M6). ``"now"`` runs it right after setup; ``"later"`` defers it (offered
+#: again from Settings); ``"skip"`` declines it entirely. Default ``"later"``
+#: keeps first-run fast and never blocks startup.
+VALID_ONBOARDING_PREFERENCES = ("now", "later", "skip")
+DEFAULT_ONBOARDING_PREFERENCE = "later"
+
+#: How often MimOSA may ask proactive "get to know you better" questions during
+#: normal use (M4 continuous learning). ``"rarely"`` ~ once every few days,
+#: ``"balanced"`` ~ up to a couple a day, ``"often"`` ~ a few a day. The default
+#: keeps MimOSA from feeling chatty/annoying.
+VALID_QUESTION_FREQUENCIES = ("rarely", "balanced", "often")
+DEFAULT_QUESTION_FREQUENCY = "balanced"
+
+#: Maximum proactive questions per day for each frequency level. Used by
+#: :class:`mimosa.learning.proactive_questioner.ProactiveQuestioner`.
+QUESTION_FREQUENCY_LIMITS = {"rarely": 1, "balanced": 2, "often": 4}
+
 #: Capability levels mirrored from
 #: :mod:`mimosa.system.capability_detector` so config validation has no heavy
 #: import dependency. Kept in sync with that module's ``LEVEL_*`` constants.
@@ -182,6 +209,18 @@ class VoiceSettings:
     input_device: str = ""       # "" => system default input
     output_device: str = ""      # "" => system default output
 
+    # -- custom wake-word training (Milestone 2) --------------------------
+    #: What the user chose to do about a custom wake word after setup:
+    #: "mimosa" (keep default) | "now" | "later". See
+    #: :data:`VALID_TRAINING_PREFERENCES`.
+    training_preference: str = DEFAULT_TRAINING_PREFERENCE
+    #: The custom wake-word name the user wants to train (e.g. "Jarvis").
+    #: Empty until they pick one; the live phrase stays :attr:`wake_word`.
+    custom_wake_word_name: str = ""
+    #: Path to a trained custom ``.onnx`` wake-word model. Empty until training
+    #: succeeds; when set, the detector loads this instead of a bundled model.
+    custom_model_path: str = ""
+
     def validate(self) -> "VoiceSettings":
         if not isinstance(self.wake_word, str) or not self.wake_word.strip():
             self.wake_word = DEFAULT_WAKE_WORD
@@ -210,7 +249,25 @@ class VoiceSettings:
 
         self.input_device = str(self.input_device or "")
         self.output_device = str(self.output_device or "")
+
+        pref = str(self.training_preference or "").strip().lower()
+        self.training_preference = (
+            pref if pref in VALID_TRAINING_PREFERENCES
+            else DEFAULT_TRAINING_PREFERENCE
+        )
+        self.custom_wake_word_name = str(self.custom_wake_word_name or "").strip()
+        self.custom_model_path = str(self.custom_model_path or "").strip()
         return self
+
+    def has_custom_model(self) -> bool:
+        """Whether a trained custom wake-word model is configured and present."""
+        import os as _os
+
+        return bool(self.custom_model_path) and _os.path.isfile(self.custom_model_path)
+
+    def wants_training_later(self) -> bool:
+        """Whether the user deferred custom wake-word training to Settings."""
+        return self.training_preference == "later" and not self.has_custom_model()
 
 
 @dataclass
@@ -560,6 +617,11 @@ class PersonalitySettings:
     #: "neutral" | "female" | "male". Biases TTS voice selection and phrasing;
     #: never gates functionality. Defaults to "neutral".
     gender: str = DEFAULT_GENDER
+    #: Whether the conversational "get to know you" onboarding has finished (M6).
+    #: Gates whether MimOSA offers to run it again on startup.
+    onboarding_complete: bool = False
+    #: The user's onboarding choice: "now" | "later" | "skip" (M6).
+    onboarding_preference: str = DEFAULT_ONBOARDING_PREFERENCE
 
     def _trim(self, value) -> str:
         try:
@@ -577,6 +639,12 @@ class PersonalitySettings:
         self.greet_by_name = bool(self.greet_by_name)
         gender = self._trim(self.gender).lower()
         self.gender = gender if gender in VALID_GENDERS else DEFAULT_GENDER
+        self.onboarding_complete = bool(self.onboarding_complete)
+        pref = self._trim(self.onboarding_preference).lower()
+        self.onboarding_preference = (
+            pref if pref in VALID_ONBOARDING_PREFERENCES
+            else DEFAULT_ONBOARDING_PREFERENCE
+        )
         return self
 
     def display_user(self) -> str:
@@ -588,6 +656,48 @@ class PersonalitySettings:
         if self.greet_by_name and self.user_name:
             return f"Hi {self.user_name}, I'm {self.assistant_name}."
         return f"Hi, I'm {self.assistant_name}."
+
+
+@dataclass
+class LearningSettings:
+    """User controls for MimOSA's continuous-learning behaviour (M4).
+
+    Everything here is opt-out: by default MimOSA quietly learns from
+    conversations and may occasionally ask a thoughtful question or offer a
+    helpful suggestion -- but the user is always in control. All learning is
+    local-only and these toggles never gate core functionality.
+    """
+
+    #: Allow MimOSA to ask occasional clarifying/"get to know you" questions.
+    allow_questions: bool = True
+    #: How often questions may be asked: "rarely" | "balanced" | "often".
+    question_frequency: str = DEFAULT_QUESTION_FREQUENCY
+    #: Allow context-aware proactive suggestions ("you usually code now…").
+    proactive_suggestions: bool = True
+    #: Extract facts/preferences from ordinary conversations (not just onboarding).
+    learn_from_conversations: bool = True
+
+    def validate(self) -> "LearningSettings":
+        self.allow_questions = bool(self.allow_questions)
+        try:
+            freq = str(self.question_frequency).strip().lower()
+        except Exception:
+            freq = DEFAULT_QUESTION_FREQUENCY
+        self.question_frequency = (
+            freq if freq in VALID_QUESTION_FREQUENCIES else DEFAULT_QUESTION_FREQUENCY
+        )
+        self.proactive_suggestions = bool(self.proactive_suggestions)
+        self.learn_from_conversations = bool(self.learn_from_conversations)
+        return self
+
+    def daily_question_limit(self) -> int:
+        """Max proactive questions per day implied by the chosen frequency."""
+        if not self.allow_questions:
+            return 0
+        return QUESTION_FREQUENCY_LIMITS.get(
+            self.question_frequency,
+            QUESTION_FREQUENCY_LIMITS[DEFAULT_QUESTION_FREQUENCY],
+        )
 
 
 @dataclass
@@ -677,6 +787,7 @@ class AppConfig:
     research: ResearchSettings = field(default_factory=ResearchSettings)
     tasks: TasksSettings = field(default_factory=TasksSettings)
     personality: PersonalitySettings = field(default_factory=PersonalitySettings)
+    learning: LearningSettings = field(default_factory=LearningSettings)
     hardware: HardwareSettings = field(default_factory=HardwareSettings)
     ui: UIConfig = field(default_factory=UIConfig)
 
@@ -693,6 +804,7 @@ class AppConfig:
         self.research.validate()
         self.tasks.validate()
         self.personality.validate()
+        self.learning.validate()
         self.hardware.validate()
         self.ui.validate()
         return self
@@ -708,6 +820,7 @@ class AppConfig:
             "research": asdict(self.research),
             "tasks": asdict(self.tasks),
             "personality": asdict(self.personality),
+            "learning": asdict(self.learning),
             "hardware": asdict(self.hardware),
             "ui": self.ui.to_dict(),
         }
@@ -735,6 +848,7 @@ class AppConfig:
             research=_section(ResearchSettings, "research"),
             tasks=_section(TasksSettings, "tasks"),
             personality=_section(PersonalitySettings, "personality"),
+            learning=_section(LearningSettings, "learning"),
             hardware=_section(HardwareSettings, "hardware"),
             ui=UIConfig.from_dict(data.get("ui") or {}),
         )

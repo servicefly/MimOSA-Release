@@ -42,6 +42,88 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
 
+# ---------------------------------------------------------------------------
+# Gender-aware voice selection (Milestone 2, requirement #9)
+# ---------------------------------------------------------------------------
+#
+# The user's voice-style preference (``personality.gender`` in the config:
+# "neutral" | "female" | "male") biases which Piper voice MimOSA speaks with
+# *and* which voices are used to synthesize wake-word training samples. This is
+# purely a presentation choice -- it never gates functionality, and every entry
+# below is a free, on-device Piper voice (nothing is sent to the cloud).
+#
+# Multiple voices per gender give the training pipeline natural variety (req #4)
+# while the first entry of each list is the preferred "speaking" voice for
+# MimOSA's own responses.
+
+#: Female-presenting Piper voices, most-preferred first.
+FEMALE_VOICES = (
+    "en_US-amy-medium",
+    "en_US-hfc_female-medium",
+    "en_US-kathleen-low",
+    "en_GB-alba-medium",
+)
+
+#: Male-presenting Piper voices, most-preferred first.
+MALE_VOICES = (
+    "en_US-ryan-medium",
+    "en_US-joe-medium",
+    "en_US-danny-low",
+    "en_GB-northern_english_male-medium",
+)
+
+#: Neutral / unspecified voices, most-preferred first. ``lessac`` is MimOSA's
+#: long-standing default and stays first so the neutral experience is unchanged.
+NEUTRAL_VOICES = (
+    DEFAULT_PIPER_VOICE,            # en_US-lessac-medium
+    "en_US-libritts_r-medium",
+)
+
+_GENDER_VOICES = {
+    "female": FEMALE_VOICES,
+    "male": MALE_VOICES,
+    "neutral": NEUTRAL_VOICES,
+}
+
+
+def voices_for_gender(gender: Optional[str]) -> Tuple[str, ...]:
+    """Return candidate Piper voice ids for a gender preference, best first.
+
+    ``gender`` is matched case-insensitively against ``female``/``male``/
+    ``neutral``. For ``neutral`` (or any unrecognised value) we return a blended
+    set: the neutral voices followed by a sampling of female and male voices, so
+    "neutral" training data hears a genuine mix of speakers (req #9).
+
+    Never raises -- always returns at least the default voice.
+    """
+    key = (gender or "").strip().lower()
+    if key == "female":
+        return FEMALE_VOICES
+    if key == "male":
+        return MALE_VOICES
+    # neutral / unknown -> a blended mix for genuine variety.
+    blended = list(NEUTRAL_VOICES)
+    blended.append(FEMALE_VOICES[0])
+    blended.append(MALE_VOICES[0])
+    # De-duplicate while preserving order.
+    seen: set = set()
+    result = []
+    for v in blended:
+        if v not in seen:
+            seen.add(v)
+            result.append(v)
+    return tuple(result) or (DEFAULT_PIPER_VOICE,)
+
+
+def voice_for_gender(gender: Optional[str]) -> str:
+    """Return the single preferred speaking voice for a gender preference.
+
+    Used for MimOSA's own spoken responses (the first/best voice for the
+    chosen style). Always returns a usable voice id.
+    """
+    candidates = voices_for_gender(gender)
+    return candidates[0] if candidates else DEFAULT_PIPER_VOICE
+
 
 class TTSError(RuntimeError):
     """Raised when text-to-speech cannot be performed.
@@ -314,11 +396,26 @@ class PiperTTS:
                 wav_file.writeframes(bytes(data))
 
 
-def create_tts(voice: Optional[str] = None, **kwargs) -> PiperTTS:
+def create_tts(
+    voice: Optional[str] = None,
+    *,
+    gender: Optional[str] = None,
+    **kwargs,
+) -> PiperTTS:
     """Factory for the default local TTS engine.
 
-    Currently always returns a :class:`PiperTTS`. Provides a stable entry point
-    so callers don't depend on the concrete class, leaving room for alternative
-    local TTS backends later.
+    Returns a :class:`PiperTTS`. Provides a stable entry point so callers don't
+    depend on the concrete class, leaving room for alternative local TTS
+    backends later.
+
+    Voice resolution (Milestone 2, requirement #9):
+
+    * If ``voice`` is given (a non-empty explicit voice id/path) it always wins.
+    * Otherwise, if ``gender`` is given, the preferred voice for that style is
+      chosen via :func:`voice_for_gender` (``female``/``male``/``neutral``).
+    * Otherwise the engine default (``PIPER_VOICE`` env or
+      :data:`DEFAULT_PIPER_VOICE`) is used.
     """
+    if not voice and gender:
+        voice = voice_for_gender(gender)
     return PiperTTS(voice=voice, **kwargs)

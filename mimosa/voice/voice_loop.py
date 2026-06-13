@@ -116,6 +116,7 @@ class VoiceLoop:
         personality=None,
         input_device_index: Optional[int] = None,
         output_device_index: Optional[int] = None,
+        continuous_learner=None,
     ) -> None:
         self._audio = audio_manager
         # Preferred microphone (PyAudio input-device index), chosen in the setup
@@ -131,6 +132,10 @@ class VoiceLoop:
         self._error_reporter = error_reporter
         self._personality = personality
         self._conversation = conversation_manager
+        #: Optional continuous learner (M4). When set, each completed turn is
+        #: quietly analysed for facts/patterns. Fully optional and defensive --
+        #: any failure is swallowed so it can never disrupt a conversation.
+        self._continuous_learner = continuous_learner
         # When an explicit response_handler is given (and no router), use the
         # legacy handler path; otherwise the intent router drives responses.
         self.response_handler: Optional[ResponseHandler] = response_handler
@@ -198,9 +203,47 @@ class VoiceLoop:
         if self._wake is None:
             from mimosa.voice.wake_word import create_wake_word_detector
 
+            # Honour a trained custom wake-word model when one is configured
+            # (M2): the custom name becomes the wake phrase and its .onnx model
+            # is loaded. Anything missing degrades to the "hey mimosa" default.
             wake_word = os.getenv("WAKE_WORD", "hey mimosa")
-            self._wake = create_wake_word_detector(wake_word)
+            model_path = None
+            try:
+                from mimosa.utils.config import AppConfigManager
+
+                cfg = AppConfigManager().get()
+                if cfg.voice.has_custom_model():
+                    model_path = cfg.voice.custom_model_path
+                    wake_word = (
+                        cfg.voice.custom_wake_word_name
+                        or cfg.voice.wake_word
+                        or wake_word
+                    )
+                elif cfg.voice.wake_word:
+                    wake_word = cfg.voice.wake_word
+            except Exception as exc:  # pragma: no cover - config optional
+                logger.debug("Could not load wake-word config (%s)", exc)
+
+            self._wake = create_wake_word_detector(
+                wake_word, model_path=model_path
+            )
         return self._wake
+
+    def reload_wake_word(self) -> None:
+        """Drop the cached wake-word detector so it's rebuilt from config (M2).
+
+        Call this after training (or otherwise changing) a custom wake word so
+        the next access of :attr:`wake` picks up the new model/phrase. Safe to
+        call anytime; never raises.
+        """
+        old = self._wake
+        self._wake = None
+        if old is not None:
+            try:
+                old.delete()
+            except Exception:  # pragma: no cover - best-effort cleanup
+                logger.debug("Could not release previous wake detector",
+                             exc_info=True)
 
     @property
     def stt(self):
@@ -217,7 +260,27 @@ class VoiceLoop:
         if self._tts is None:
             from mimosa.voice.tts import create_tts
 
-            self._tts = create_tts()
+            # Honour the user's voice preferences (M2 req #9): an explicit
+            # tts_voice always wins; otherwise the voice-style "gender" choice
+            # biases which Piper voice MimOSA speaks with. Config is optional --
+            # any failure degrades to the engine default.
+            voice = ""
+            gender = ""
+            speed = None
+            try:
+                from mimosa.utils.config import AppConfigManager
+
+                cfg = AppConfigManager().get()
+                voice = (cfg.voice.tts_voice or "").strip()
+                gender = (cfg.personality.gender or "").strip()
+                speed = cfg.voice.tts_speed
+            except Exception as exc:  # pragma: no cover - config optional
+                logger.debug("Could not load TTS voice prefs (%s)", exc)
+
+            kwargs = {}
+            if speed:
+                kwargs["speed"] = speed
+            self._tts = create_tts(voice or None, gender=gender or None, **kwargs)
         return self._tts
 
     @property
@@ -261,13 +324,38 @@ class VoiceLoop:
             except Exception as exc:  # pragma: no cover - config optional
                 logger.debug("Could not load custom skills (%s)", exc)
 
+            # Load the learned user profile (M3) so LLM-backed skills can
+            # personalise their answers. Best-effort: any failure -> no profile.
+            user_profile = None
+            try:
+                from mimosa.memory.profile_manager import ProfileManager
+
+                pm = ProfileManager(autosave=False)
+                if not pm.profile.is_empty():
+                    user_profile = pm.profile
+            except Exception as exc:  # pragma: no cover - memory optional
+                logger.debug("Could not load user profile (%s)", exc)
+
             self._router = IntentRouter(
                 llm_provider=provider,
                 custom_skills=custom_skills,
                 error_reporter=self._error_reporter,
                 personality=self._personality,
+                user_profile=user_profile,
             )
         return self._router
+
+    def set_user_profile(self, user_profile) -> None:
+        """Refresh the learned user profile on the live router (M3).
+
+        Called by the app after onboarding completes or the profile is edited so
+        in-flight skills immediately reflect the new information. Best-effort.
+        """
+        try:
+            if self._router is not None and hasattr(self._router, "set_user_profile"):
+                self._router.set_user_profile(user_profile)
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not set user profile on router", exc_info=True)
 
     @staticmethod
     def _build_configured_provider(app_cfg, create_provider):
@@ -419,10 +507,12 @@ class VoiceLoop:
         # Legacy/simple handler path (e.g. M1.2 echo handler in tests).
         if not self._use_router and self.response_handler is not None:
             try:
-                return self.response_handler(text)
+                reply = self.response_handler(text)
             except Exception as exc:
                 logger.error("Response handler failed: %s", exc)
-                return "Sorry, something went wrong while processing that."
+                reply = "Sorry, something went wrong while processing that."
+            self._learn_from_exchange(text, reply)
+            return reply
 
         # Intent-router path (M1.3): classify -> skill -> reply, with context.
         try:
@@ -445,7 +535,23 @@ class VoiceLoop:
         except Exception:  # pragma: no cover
             pass
 
+        # Feed the exchange to the continuous learner (opt-in, best-effort).
+        self._learn_from_exchange(text, reply)
+
         return reply
+
+    def _learn_from_exchange(self, user_text: str, reply: str) -> None:
+        """Hand one exchange to the continuous learner, if configured.
+
+        Opt-in and strictly best-effort: a learning failure never gates or
+        interrupts the conversation loop.
+        """
+        if self._continuous_learner is None:
+            return
+        try:
+            self._continuous_learner.analyze_conversation(user_text, reply)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Continuous learning step failed", exc_info=True)
 
     def run(self) -> None:
         """Run the loop continuously until :meth:`stop` is called.

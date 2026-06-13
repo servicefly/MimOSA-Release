@@ -169,3 +169,45 @@ PrivacySettings(
     auto_private_mode     = True,   # M5.4
 )
 ```
+
+
+
+---
+
+## 8. Consolidation & relationship (Milestone 4)
+
+Milestone 4 keeps the memory store **accurate, lean and relationship-aware** over
+time. See [`CONTINUOUS_LEARNING.md`](CONTINUOUS_LEARNING.md) for the full picture.
+
+### 8.1 Memory consolidation — `mimosa/memory/consolidator.py`
+
+As memories accumulate, duplicates and contradictions creep in. The consolidator:
+
+- **Merges duplicates** — near-identical memories collapse into one.
+- **Reconciles contradictions** — when two memories conflict, the **newer** one
+  wins and the stale one is retired.
+- **Tidies clutter** — low-value, stale entries are pruned.
+
+Two passes are available: a fast **light pass** (opportunistic duplicate merge)
+and a thorough **deep pass** (contradiction reconciliation + pruning). Trigger a
+deep pass from **Settings → Learning → Memory Management → Consolidate now**.
+
+### 8.2 Relationship tracking — `mimosa/memory/relationship_tracker.py`
+
+MimOSA keeps a private sense of how well it knows you, mapped to a stage:
+
+| Stage | Meaning |
+| --- | --- |
+| **new** | Just getting started |
+| **familiar** | You've chatted a fair bit |
+| **close** | A well-established companion |
+
+The stage gently shapes the assistant's tone via
+`build_system_prompt(..., relationship_note=...)` and is shown in
+**Settings → Learning**.
+
+### 8.3 Storage
+
+Patterns, the questions-asked log and relationship state are stored locally
+alongside the existing collections under `~/.local/share/mimosa/` (see
+[`paths.py`](../mimosa/memory/paths.py)). Nothing leaves your device.

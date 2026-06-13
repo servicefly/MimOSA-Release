@@ -20,6 +20,6 @@ sub-packages: :mod:`mimosa.core`, :mod:`mimosa.llm`, :mod:`mimosa.voice`,
 :mod:`mimosa.ui`, and :mod:`mimosa.utils`.
 """
 
-__version__ = "1.0.0rc2"
+__version__ = "1.1.0"
 __author__ = "A. Henry"
 __all__ = ["__version__", "__author__"]

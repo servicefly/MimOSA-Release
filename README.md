@@ -36,6 +36,11 @@ time, and lets its language model run either in the cloud or **fully locally**
   shares the same brain as the voice loop.
 - **🔒 Encrypted memory & learning** — local, encrypted conversation store with
   preference learning and proactive context.
+- **🌱 Continuous learning (v1.1.0)** — MimOSA keeps getting to know you from
+  everyday conversations, occasionally asks a thoughtful question, consolidates
+  its memory, tracks your relationship (new → familiar → close) and offers
+  high-confidence, context-aware suggestions — all local-only and opt-out. See
+  [`docs/CONTINUOUS_LEARNING.md`](docs/CONTINUOUS_LEARNING.md).
 - **🔎 Privacy-aware research** — multi-source web research that respects your
   privacy.
 - **♿ Accessible & graceful** — accessibility-labelled UI, and everything

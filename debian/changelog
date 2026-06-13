@@ -1,3 +1,72 @@
+mimosa-assistant (1.1.0-1) unstable; urgency=medium
+
+  * Milestone 4: Continuous Learning & Polish — MimOSA grows from a one-time
+    learner into a companion that keeps getting to know you over time.
+  * Continuous learning: facts and preferences are now picked up from everyday
+    conversations (not just onboarding) and folded into your local profile.
+  * Proactive questions: MimOSA may occasionally ask a thoughtful "get to know
+    you" question, gently rate-limited to one or two a day and fully opt-out.
+  * Memory consolidation: duplicate memories are merged, contradictions are
+    reconciled and stale clutter is tidied, so memory stays accurate and lean.
+  * Relationship tracking: MimOSA understands how well it knows you (new →
+    familiar → close) and adjusts its warmth and familiarity accordingly.
+  * Context-aware suggestions: high-confidence, time/pattern-aware nudges
+    ("you usually start coding around now…") that you can switch off any time.
+  * New Settings: Learning Preferences (questions, frequency, suggestions,
+    learn-from-conversations), Memory Management (view memory, consolidate)
+    and a friendly display of your current relationship stage.
+  * Conversation quality: light emotion awareness and reference resolution so
+    follow-ups like "open it again" feel natural.
+  * Everything stays local-only and opt-out; learning never gates core
+    functionality and never interrupts a conversation.
+
+ -- ServiceFly <info.markethiveapp@gmail.com>  Sat, 13 Jun 2026 01:59:44 +0000
+
+mimosa-assistant (1.0.0-1) unstable; urgency=medium
+
+  * Milestone 3: conversational onboarding & memory system — MimOSA's first
+    full release. After setup, MimOSA can have a warm, friend-like "get to
+    know you" chat (never a dry questionnaire) and remembers what it learns.
+  * New on-device memory store (Chroma-backed with a pure-Python fallback)
+    holding four collections: user profile, conversation history, learned
+    preferences and episodic memories — all stored locally under
+    ~/.local/share/mimosa/memory.
+  * Adaptive conversation engine across seven topics with follow-up
+    questions, response-depth analysis and gentle encouragement for thin
+    answers; pause/resume so an interrupted onboarding picks up where it
+    left off.
+  * LLM-assisted fact extraction (with a heuristic offline fallback) builds
+    a structured user profile that is injected into the assistant's system
+    prompt so answers feel personal.
+  * Settings gains "Review / Edit My Profile", "Redo Onboarding" and
+    "Clear All Memories".
+  * Graceful degradation throughout: missing Chroma falls back to JSON, a
+    missing LLM falls back to heuristic extraction, and onboarding is
+    always optional and resumable.
+
+ -- ServiceFly <info.markethiveapp@gmail.com>  Sat, 13 Jun 2026 01:20:27 +0000
+
+mimosa-assistant (1.0.0~rc3-1) unstable; urgency=medium
+
+  * Milestone 2: custom wake-word training system. Train a personal wake
+    word (e.g. "Jarvis") entirely on-device — no audio ever leaves your
+    machine, and "Hey MimOSA" always remains as a guaranteed fallback.
+  * Setup wizard redesigned with a persistent, friendly guidance sidebar
+    (replacing the old per-field info-icon tooltips) and a new "Your Own
+    Wake Word" step with live name analysis (difficulty, success odds,
+    phonetics, false-trigger warnings and per-hardware time estimates).
+  * New training UI with staged progress, time remaining, pause/resume and
+    cancel; a "Test Your Wake Word" step; and a one-time dependency
+    download prompt before pulling the ~2.5 GB training stack.
+  * Gender-aware Piper voice selection for synthetic training data and
+    spoken responses.
+  * Settings gains "Re-run Setup Wizard" and "Train a custom wake word"
+    actions (other settings are preserved).
+  * Graceful degradation throughout: training never crashes the assistant
+    and always falls back to "Hey MimOSA".
+
+ -- ServiceFly <info.markethiveapp@gmail.com>  Fri, 12 Jun 2026 22:27:47 +0000
+
 mimosa-assistant (1.0.0~rc2-1) unstable; urgency=medium
 
   * Milestone 1: replaced Porcupine with openWakeWord for 100% local,

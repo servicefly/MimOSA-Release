@@ -158,8 +158,34 @@ class MimOSAApplication:
                 personality=self.config_manager.get().personality,
                 input_device_index=device_index,
                 output_device_index=output_index,
+                continuous_learner=self._build_continuous_learner(),
             )
         return self._voice_loop
+
+    def _build_continuous_learner(self):
+        """Build the continuous learner if the user has opted in (best-effort).
+
+        Returns ``None`` when learning is disabled or construction fails, so
+        the voice loop simply skips the learning step rather than crashing.
+        """
+        try:
+            learning = getattr(self.config_manager.get(), "learning", None)
+            if learning is not None and not getattr(
+                learning, "learn_from_conversations", True
+            ):
+                return None
+            from mimosa.learning.continuous_learner import ContinuousLearner
+            from mimosa.learning.pattern_detector import PatternDetector
+            from mimosa.memory.profile_manager import ProfileManager
+
+            return ContinuousLearner(
+                profile_manager=ProfileManager(),
+                pattern_detector=PatternDetector(),
+                enabled=True,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Could not build continuous learner", exc_info=True)
+            return None
 
     def _start_voice_thread(self) -> None:
         """Run the voice loop on a daemon worker thread (GUI mode)."""
@@ -217,15 +243,339 @@ class MimOSAApplication:
                 return
             from mimosa.ui.setup_wizard_dialog import open_setup_wizard
 
+            def _on_wizard_close(applied: bool) -> None:
+                self._apply_ui_preferences()
+                # Post-setup training workflow (M2): if the user asked to train
+                # their custom wake word "now", kick it off; otherwise the
+                # default "Hey MimOSA" (or a "train later" reminder) stands.
+                self._maybe_start_training_workflow(transient_for=transient_for)
+
             dialog = open_setup_wizard(
                 self.config_manager,
                 transient_for=transient_for,
-                on_close=lambda applied: self._apply_ui_preferences(),
+                on_close=_on_wizard_close,
             )
             if dialog is None:
                 logger.info("First-run setup completed with defaults (headless).")
         except Exception:  # pragma: no cover - wizard is best-effort
             logger.debug("Setup wizard could not run", exc_info=True)
+
+    def _maybe_start_training_workflow(self, transient_for=None) -> None:
+        """Start custom wake-word training iff the user chose "train now" (M2).
+
+        Reads the freshly-persisted config: when ``voice.training_preference``
+        is ``"now"`` and a custom name is set, launch the training dialog. Any
+        other state (``"later"``/``"mimosa"``) leaves the default wake word in
+        place. Best-effort and never fatal.
+        """
+        try:
+            voice = self.config_manager.get().voice
+            name = (getattr(voice, "custom_wake_word_name", "") or "").strip()
+            pref = getattr(voice, "training_preference", "mimosa")
+            if pref == "now" and name:
+                self._train_custom_wake_word(name, transient_for=transient_for)
+            else:
+                # No training now -> proceed straight to onboarding (M3).
+                self._maybe_start_onboarding_workflow(transient_for=transient_for)
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not start training workflow", exc_info=True)
+
+    def _train_custom_wake_word(self, name=None, transient_for=None) -> None:
+        """Open the training dialog for ``name`` and wire up its outcome (M2).
+
+        On success the trained model is recorded in config, the running voice
+        loop reloads it, and the user is invited to test it. On cancel/failure
+        we keep "Hey MimOSA". Never raises.
+        """
+        try:
+            voice = self.config_manager.get().voice
+            name = (name or getattr(voice, "custom_wake_word_name", "") or "").strip()
+            if not name:
+                return
+            gender = ""
+            try:
+                gender = self.config_manager.get().personality.gender or "neutral"
+            except Exception:
+                gender = "neutral"
+            from mimosa.ui.training_dialog import open_training_dialog
+
+            def _on_training_close(result) -> None:
+                self._on_training_complete(result, transient_for=transient_for)
+
+            open_training_dialog(
+                name,
+                gender=gender or "neutral",
+                transient_for=transient_for or self.window,
+                on_close=_on_training_close,
+            )
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not open training dialog", exc_info=True)
+
+    def _on_training_complete(self, result, transient_for=None) -> None:
+        """Persist a successful model + reload the loop, then offer a test (M2)."""
+        try:
+            if result is not None and getattr(result, "ok", False) \
+                    and getattr(result, "model_path", ""):
+                # Record the trained model and stop nagging to "train later".
+                self.config_manager.update_section(
+                    "voice",
+                    custom_model_path=result.model_path,
+                    custom_wake_word_name=result.wake_word,
+                    training_preference="mimosa",
+                )
+                try:
+                    self.voice_loop.reload_wake_word()
+                except Exception:  # pragma: no cover - loop optional
+                    logger.debug("Could not reload wake word", exc_info=True)
+                # Invite the user to test their new wake word.
+                from mimosa.ui.test_wakeword_dialog import open_test_wakeword_dialog
+
+                open_test_wakeword_dialog(
+                    result.wake_word,
+                    model_path=result.model_path,
+                    transient_for=transient_for or self.window,
+                )
+            else:
+                logger.info("Custom wake-word training did not complete; "
+                            "keeping the default wake word.")
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Post-training handling failed", exc_info=True)
+        finally:
+            # Onboarding follows wake-word setup regardless of its outcome (M3).
+            self._maybe_start_onboarding_workflow(transient_for=transient_for)
+
+    # -- onboarding (M3) ---------------------------------------------------
+    def _build_llm_provider(self):
+        """Build the configured LLM provider, or ``None`` (graceful). Never raises."""
+        try:
+            from mimosa.llm.provider_factory import create_provider
+            from mimosa.voice.voice_loop import VoiceLoop
+
+            return VoiceLoop._build_configured_provider(
+                self.config_manager.get(), create_provider
+            )
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not build LLM provider for onboarding",
+                         exc_info=True)
+            return None
+
+    def _build_onboarding_manager(self):
+        """Construct an :class:`OnboardingManager` wired to memory + LLM."""
+        from mimosa.memory.profile_manager import ProfileManager
+        from mimosa.memory.vector_store import MemoryVectorStore
+        from mimosa.onboarding import OnboardingManager
+
+        vector_store = None
+        try:
+            vector_store = MemoryVectorStore()
+        except Exception:  # pragma: no cover - storage optional
+            logger.debug("Could not open memory vector store", exc_info=True)
+        profile_manager = ProfileManager(vector_store=vector_store)
+        return OnboardingManager(
+            llm=self._build_llm_provider(),
+            profile_manager=profile_manager,
+            vector_store=vector_store,
+            config_manager=self.config_manager,
+        )
+
+    def _maybe_start_onboarding_workflow(self, transient_for=None) -> None:
+        """Offer the conversational onboarding after setup, if appropriate (M3).
+
+        Runs only when the user hasn't completed it and hasn't opted to skip.
+        The default preference is "later", which is non-blocking: we don't force
+        it at startup, but we do surface it once right after setup so new users
+        discover it. Best-effort and never fatal.
+        """
+        try:
+            manager = self._build_onboarding_manager()
+            if not manager.should_run():
+                return
+            from mimosa.ui.onboarding_dialog import open_onboarding_dialog
+
+            open_onboarding_dialog(
+                manager,
+                transient_for=transient_for or self.window,
+                on_close=lambda completed: self._on_onboarding_complete(
+                    manager, completed
+                ),
+            )
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not start onboarding workflow", exc_info=True)
+
+    def _on_onboarding_complete(self, manager, completed) -> None:
+        """After onboarding closes, refresh the live persona profile (M3)."""
+        try:
+            if completed:
+                self._refresh_user_profile(manager.profile_manager)
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Post-onboarding handling failed", exc_info=True)
+
+    def _refresh_user_profile(self, profile_manager) -> None:
+        """Inject the learned profile into the running voice loop's prompt (M3)."""
+        try:
+            loop = self._voice_loop
+            if loop is not None and hasattr(loop, "set_user_profile"):
+                loop.set_user_profile(profile_manager.profile)
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not refresh user profile", exc_info=True)
+
+    def _redo_onboarding(self) -> None:
+        """Settings hook: clear completion flag and run onboarding again (M3)."""
+        try:
+            self.config_manager.update_section(
+                "personality", persist=True, onboarding_complete=False
+            )
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not reset onboarding flag", exc_info=True)
+        self._maybe_start_onboarding_workflow(transient_for=self.window)
+
+    def _review_profile(self) -> None:
+        """Settings hook: open the profile viewer/editor (M3)."""
+        try:
+            from mimosa.memory.profile_manager import ProfileManager
+            from mimosa.memory.vector_store import MemoryVectorStore
+            from mimosa.ui.profile_viewer import open_profile_viewer
+
+            vector_store = None
+            try:
+                vector_store = MemoryVectorStore()
+            except Exception:  # pragma: no cover
+                vector_store = None
+            pm = ProfileManager(vector_store=vector_store)
+
+            def _on_save(edited):
+                try:
+                    from mimosa.memory.profile_manager import UserProfile
+
+                    pm.profile = UserProfile.from_dict(edited)
+                    pm.save()
+                    self._refresh_user_profile(pm)
+                except Exception:  # pragma: no cover
+                    logger.debug("Could not save edited profile", exc_info=True)
+
+            open_profile_viewer(
+                pm.to_dict(),
+                transient_for=self.window,
+                on_save=_on_save,
+            )
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not open profile viewer", exc_info=True)
+
+    def _clear_all_memories(self) -> None:
+        """Settings hook: wipe the profile and all stored memories (M3)."""
+        try:
+            from mimosa.memory.profile_manager import ProfileManager
+            from mimosa.memory.vector_store import MemoryVectorStore
+
+            try:
+                store = MemoryVectorStore()
+                store.reset()
+                store.close()
+            except Exception:  # pragma: no cover
+                logger.debug("Could not reset vector store", exc_info=True)
+            pm = ProfileManager()
+            pm.clear()
+            self.config_manager.update_section(
+                "personality", persist=True, onboarding_complete=False
+            )
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not clear memories", exc_info=True)
+
+    def _view_memory(self) -> None:
+        """Settings hook: open the read-only memory viewer (M4)."""
+        try:
+            from mimosa.memory.profile_manager import ProfileManager
+            from mimosa.learning.pattern_detector import PatternDetector
+            from mimosa.memory.relationship_tracker import RelationshipTracker
+            from mimosa.learning.proactive_questioner import ProactiveQuestioner
+            from mimosa.ui.memory_viewer import open_memory_viewer
+
+            pm = ProfileManager()
+            patterns = []
+            try:
+                patterns = PatternDetector().detect_patterns()
+            except Exception:  # pragma: no cover
+                patterns = []
+            relationship = None
+            try:
+                relationship = RelationshipTracker().summary()
+            except Exception:  # pragma: no cover
+                relationship = None
+            questions = []
+            try:
+                questions = ProactiveQuestioner().asked
+            except Exception:  # pragma: no cover
+                questions = []
+
+            open_memory_viewer(
+                profile=pm.to_dict(),
+                patterns=patterns,
+                relationship=relationship,
+                questions=questions,
+                transient_for=self.window,
+                on_clear=self._clear_all_memories,
+            )
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not open memory viewer", exc_info=True)
+
+    def _consolidate_memory(self):
+        """Settings hook: tidy up the profile (merge dupes, flag conflicts)."""
+        try:
+            from mimosa.memory.profile_manager import ProfileManager
+            from mimosa.memory.consolidator import (
+                MemoryConsolidator,
+                CONSOLIDATION_DEEP,
+            )
+
+            pm = ProfileManager()
+            report = MemoryConsolidator(pm).consolidate(mode=CONSOLIDATION_DEEP)
+            self._refresh_user_profile(pm)
+            return report
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not consolidate memory", exc_info=True)
+            return None
+
+    def _memory_stats_text(self) -> str:
+        """Settings hook: a one-line summary of what's stored."""
+        try:
+            from mimosa.memory.profile_manager import ProfileManager
+
+            pm = ProfileManager()
+            prof = pm.profile
+            n_skills = len(getattr(prof, "skills", []) or [])
+            n_interests = len(getattr(prof, "interests", []) or [])
+            n_people = len(getattr(prof, "relationships", {}) or {})
+            return (
+                f"I'm remembering {n_skills} skill(s), {n_interests} interest(s), "
+                f"and {n_people} person(s) — all stored locally."
+            )
+        except Exception:  # pragma: no cover - best-effort
+            return ""
+
+    def _relationship_text(self) -> str:
+        """Settings hook: a friendly description of the relationship stage."""
+        try:
+            from mimosa.memory.relationship_tracker import RelationshipTracker
+            from mimosa.ui.memory_viewer import format_relationship_section
+
+            return format_relationship_section(RelationshipTracker().summary())
+        except Exception:  # pragma: no cover - best-effort
+            return "We're just getting to know each other."
+
+    def _rerun_setup_wizard(self) -> None:
+        """Reset first-run state and reopen the setup wizard (M2, Settings).
+
+        Other settings are preserved; only the wizard flow runs again. The
+        wizard's normal completion path then re-applies preferences and may
+        start training. Never raises.
+        """
+        try:
+            cfg = self.config_manager.get()
+            cfg.first_run_complete = False
+            self.config_manager.replace(cfg)
+            self._maybe_run_setup_wizard(transient_for=self.window)
+        except Exception:  # pragma: no cover - best-effort
+            logger.debug("Could not re-run setup wizard", exc_info=True)
 
     def _warn_if_mic_unavailable(self, transient_for=None) -> None:
         """Surface a warning if the configured microphone can't be found.
@@ -452,7 +802,7 @@ class MimOSAApplication:
             try:
                 from mimosa import __version__ as version
             except Exception:
-                version = "1.0.0-rc.2"
+                version = "1.1.0"
 
             dialog = Gtk.AboutDialog()
             if transient_for is not None:
@@ -558,6 +908,15 @@ class MimOSAApplication:
             on_clear_history=_on_clear_history,
             on_close=_on_close,
             system_summary=_system_summary(),
+            on_rerun_wizard=self._rerun_setup_wizard,
+            on_train_wakeword=self._train_custom_wake_word,
+            on_review_profile=self._review_profile,
+            on_redo_onboarding=self._redo_onboarding,
+            on_clear_memories=self._clear_all_memories,
+            on_consolidate_memory=self._consolidate_memory,
+            on_view_memory=self._view_memory,
+            memory_stats_provider=self._memory_stats_text,
+            relationship_provider=self._relationship_text,
         )
 
     def _apply_ui_preferences(self) -> None:

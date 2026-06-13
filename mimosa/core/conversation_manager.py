@@ -27,6 +27,7 @@ injected to persist/retrieve turns without changing callers. The
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -41,6 +42,68 @@ logger = logging.getLogger(__name__)
 
 #: Default number of *turns* (user+assistant pairs) to retain.
 DEFAULT_MAX_HISTORY = 10
+
+# Emotion detection (M4) ----------------------------------------------------
+EMOTION_NEUTRAL = "neutral"
+EMOTION_FRUSTRATED = "frustrated"
+EMOTION_EXCITED = "excited"
+EMOTION_STRESSED = "stressed"
+
+#: Lightweight keyword cues per emotion. Deliberately conservative -- this is a
+#: *hint* used to soften MimOSA's tone, never a diagnosis. Lowercase substrings.
+_EMOTION_CUES = {
+    EMOTION_FRUSTRATED: (
+        "frustrated", "annoyed", "ugh", "this is stupid", "not working",
+        "doesn't work", "won't work", "broken", "hate this", "useless",
+        "come on", "seriously", "fed up", "again?!",
+    ),
+    EMOTION_STRESSED: (
+        "stressed", "overwhelmed", "so much to do", "no time", "deadline",
+        "running late", "panic", "anxious", "swamped", "can't keep up",
+        "too much", "burnt out", "burned out",
+    ),
+    EMOTION_EXCITED: (
+        "awesome", "amazing", "excited", "can't wait", "love it", "yay",
+        "fantastic", "brilliant", "so cool", "this is great", "woohoo",
+        "let's go", "pumped", "thrilled",
+    ),
+}
+
+#: Pronouns that usually refer back to something said earlier.
+_REFERENCE_PRONOUNS = frozenset(
+    {"it", "that", "this", "them", "those", "these", "they", "one"}
+)
+
+_WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z'\-]*")
+
+
+def detect_emotion(text: str) -> str:
+    """Best-effort emotion hint for *text*.
+
+    Returns one of ``"frustrated"``, ``"stressed"``, ``"excited"`` or
+    ``"neutral"``. Uses simple, transparent keyword/punctuation cues so it's
+    fully deterministic and hermetic. Never raises.
+    """
+    try:
+        low = str(text or "").lower().strip()
+        if not low:
+            return EMOTION_NEUTRAL
+        scores: Dict[str, int] = {k: 0 for k in _EMOTION_CUES}
+        for emotion, cues in _EMOTION_CUES.items():
+            for cue in cues:
+                if cue in low:
+                    scores[emotion] += 1
+        # Punctuation signals: many !!! → excitement or frustration emphasis.
+        exclaims = low.count("!")
+        if exclaims >= 2:
+            # Bias toward whichever (frust/excited) already has a cue, else
+            # treat strong exclamation as excitement.
+            if scores[EMOTION_FRUSTRATED] == 0 and scores[EMOTION_EXCITED] == 0:
+                scores[EMOTION_EXCITED] += 1
+        best = max(scores, key=lambda k: scores[k])
+        return best if scores[best] > 0 else EMOTION_NEUTRAL
+    except Exception:  # pragma: no cover - defensive
+        return EMOTION_NEUTRAL
 
 
 @dataclass
@@ -229,6 +292,75 @@ class ConversationManager:
     def last_intent(self) -> Optional[str]:
         """The intent of the most recent turn, if any."""
         return self._turns[-1].intent if self._turns else None
+
+    # -- conversational intelligence (M4) ---------------------------------
+
+    def last_user_text(self) -> str:
+        """The most recent non-empty user utterance, or ``""``."""
+        for turn in reversed(self._turns):
+            if turn.user_text:
+                return turn.user_text
+        return ""
+
+    def recent_user_texts(self, n: int = 5) -> List[str]:
+        """Up to *n* most recent user utterances (oldest first)."""
+        texts = [t.user_text for t in self._turns if t.user_text]
+        return texts[-max(0, int(n)):]
+
+    @staticmethod
+    def has_reference(text: str) -> bool:
+        """Whether *text* contains a back-reference pronoun ("it", "that"…)."""
+        try:
+            words = {w.lower() for w in _WORD_RE.findall(str(text or ""))}
+            return bool(words & _REFERENCE_PRONOUNS)
+        except Exception:  # pragma: no cover - defensive
+            return False
+
+    def resolve_references(self, text: str) -> str:
+        """Best-effort pronoun resolution using recent context.
+
+        If *text* leans on a back-reference ("can you close it?") and we have a
+        prior turn, we append a parenthetical hint naming the most likely
+        referent (a salient noun from the previous user message). This keeps the
+        original wording intact while giving downstream skills/LLM the context
+        to disambiguate. When nothing useful is found, *text* is returned
+        unchanged. Never raises.
+        """
+        try:
+            t = str(text or "").strip()
+            if not t or not self.has_reference(t):
+                return t
+            referent = self._salient_referent()
+            if not referent:
+                return t
+            if referent.lower() in t.lower():
+                return t
+            return f"{t} (referring to: {referent})"
+        except Exception:  # pragma: no cover - defensive
+            return str(text or "")
+
+    def _salient_referent(self) -> str:
+        """Pick a likely referent from the previous user turn(s).
+
+        Heuristic: the last "content" word (skipping common stopwords) of the
+        most recent user message that *isn't* itself just a pronoun question.
+        """
+        stop = _REFERENCE_PRONOUNS | {
+            "the", "a", "an", "can", "you", "please", "could", "would", "do",
+            "i", "me", "my", "we", "to", "for", "and", "or", "is", "are", "of",
+            "on", "in", "at", "with", "what", "how", "when", "where", "why",
+            "open", "close", "show", "tell", "give", "get", "make", "let",
+        }
+        # Skip the current (most recent) turn -- we want the prior one.
+        prior = [t.user_text for t in self._turns if t.user_text]
+        if len(prior) < 2:
+            return ""
+        for utter in reversed(prior[:-1]):
+            words = _WORD_RE.findall(utter)
+            for w in reversed(words):
+                if w.lower() not in stop and len(w) > 2:
+                    return w
+        return ""
 
     # -- durable store integration (M5.1) ---------------------------------
 

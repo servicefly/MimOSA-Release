@@ -47,19 +47,24 @@ class QuestionSkill(BaseSkill):
     uses_llm = True
 
     def __init__(self, llm_provider=None, max_tokens: int = 256,
-                 personality=None) -> None:
+                 personality=None, user_profile=None) -> None:
         super().__init__(llm_provider=llm_provider)
         self.max_tokens = max_tokens
         #: Optional :class:`~mimosa.utils.config.PersonalitySettings` so answers
         #: adopt the user's chosen assistant name, address, and verbosity.
         self.personality = personality
+        #: Optional learned :class:`~mimosa.memory.profile_manager.UserProfile`
+        #: (M3) injected so answers reflect what MimOSA knows about the user.
+        self.user_profile = user_profile
 
     def _system_prompt(self) -> str:
         """MimOSA's identity + tone + question task, personalised when known."""
-        if self.personality is None:
+        if self.personality is None and self.user_profile is None:
             return QUESTION_SYSTEM_PROMPT
         return build_system_prompt(
-            QUESTION_TASK_INSTRUCTIONS, personality=self.personality
+            QUESTION_TASK_INSTRUCTIONS,
+            personality=self.personality,
+            user_profile=self.user_profile,
         )
 
     def handle(self, text: str, context: Optional[List] = None) -> SkillResult:

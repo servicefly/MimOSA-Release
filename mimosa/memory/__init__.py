@@ -55,6 +55,24 @@ from mimosa.memory.semantic_memory import (
     SemanticMemory,
     SemanticResult,
 )
+from mimosa.memory.vector_store import (
+    COLLECTION_CONVERSATION,
+    COLLECTION_EPISODIC,
+    COLLECTION_PREFERENCES,
+    COLLECTION_USER_PROFILE,
+    DEFAULT_COLLECTIONS,
+    MemoryVectorStore,
+)
+from mimosa.memory.profile_manager import (
+    ProfileManager,
+    UserProfile,
+)
+from mimosa.memory.memory_consolidator import (
+    ConsolidationResult,
+    consolidate_facts,
+    consolidate_texts,
+    text_similarity,
+)
 
 __all__ = [
     "ConversationStore",
@@ -73,4 +91,17 @@ __all__ = [
     "preferences_db_path",
     "private_db_path",
     "semantic_store_dir",
+    # M3 — memory & onboarding
+    "MemoryVectorStore",
+    "DEFAULT_COLLECTIONS",
+    "COLLECTION_USER_PROFILE",
+    "COLLECTION_CONVERSATION",
+    "COLLECTION_PREFERENCES",
+    "COLLECTION_EPISODIC",
+    "ProfileManager",
+    "UserProfile",
+    "ConsolidationResult",
+    "consolidate_facts",
+    "consolidate_texts",
+    "text_similarity",
 ]

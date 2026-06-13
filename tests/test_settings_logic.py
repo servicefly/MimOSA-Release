@@ -43,7 +43,7 @@ def test_page_specs_cover_all_required_pages():
     ids = [p.page_id for p in build_page_specs()]
     assert ids == [
         PAGE_VOICE, PAGE_PERSONALIZE, PAGE_SKILLS, "system", PAGE_PRIVACY,
-        PAGE_TASKS, PAGE_RESEARCH, PAGE_UI, PAGE_ABOUT,
+        PAGE_TASKS, PAGE_RESEARCH, PAGE_UI, "learning", PAGE_ABOUT,
     ]
 
 

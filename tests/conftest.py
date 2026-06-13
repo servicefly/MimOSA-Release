@@ -19,7 +19,32 @@ overrides win for the duration of the test.
 
 from __future__ import annotations
 
+import io
+import struct
+import wave
+
 import pytest
+
+
+def make_wav_bytes(num_samples: int = 1600, *, sample_rate: int = 16000,
+                   amplitude: int = 1000) -> bytes:
+    """Return a tiny valid 16 kHz mono 16-bit WAV blob for stub synthesis.
+
+    Used by the Milestone-2 training tests so heavy TTS/ML back-ends never run.
+    """
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(struct.pack("<h", amplitude) * num_samples)
+    return buf.getvalue()
+
+
+@pytest.fixture()
+def wav_bytes_factory():
+    """Expose :func:`make_wav_bytes` as a fixture for convenience."""
+    return make_wav_bytes
 
 
 @pytest.fixture(autouse=True)

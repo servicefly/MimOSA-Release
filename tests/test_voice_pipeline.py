@@ -500,3 +500,50 @@ class TestVoiceLoop:
         # PAUSED must be its own VoiceState so the UI can show a paused look.
         assert vl.VoiceState.PAUSED.value == "paused"
         assert vl.VoiceState.PAUSED is not vl.VoiceState.IDLE
+
+
+
+class TestVoiceLoopContinuousLearner:
+    """The voice loop should feed each exchange to the continuous learner
+    (M4) without ever letting a learning failure break the conversation."""
+
+    class _RecordingLearner:
+        def __init__(self, boom=False):
+            self.calls = []
+            self.boom = boom
+
+        def analyze_conversation(self, user_message, assistant_response=""):
+            self.calls.append((user_message, assistant_response))
+            if self.boom:
+                raise RuntimeError("learning blew up")
+            return {"facts": [], "applied": 0}
+
+    def test_learner_receives_exchange(self):
+        learner = self._RecordingLearner()
+        loop = vl.VoiceLoop(
+            audio_manager=_FakeAudio(),
+            response_handler=lambda t: f"reply:{t}",
+            continuous_learner=learner,
+        )
+        reply = loop._generate_reply("i use firefox a lot")
+        assert reply == "reply:i use firefox a lot"
+        assert learner.calls == [("i use firefox a lot", "reply:i use firefox a lot")]
+
+    def test_learner_failure_does_not_break_turn(self):
+        learner = self._RecordingLearner(boom=True)
+        loop = vl.VoiceLoop(
+            audio_manager=_FakeAudio(),
+            response_handler=lambda t: f"reply:{t}",
+            continuous_learner=learner,
+        )
+        # Even though the learner raises, the reply still comes back cleanly.
+        reply = loop._generate_reply("hello")
+        assert reply == "reply:hello"
+        assert learner.calls  # it was still attempted
+
+    def test_no_learner_is_fine(self):
+        loop = vl.VoiceLoop(
+            audio_manager=_FakeAudio(),
+            response_handler=lambda t: f"reply:{t}",
+        )
+        assert loop._generate_reply("hi") == "reply:hi"

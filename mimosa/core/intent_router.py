@@ -322,10 +322,14 @@ class IntentRouter:
         custom_skills: Optional[List[CustomSkill]] = None,
         error_reporter=None,
         personality=None,
+        user_profile=None,
     ) -> None:
         self.llm = llm_provider
         #: Optional personalisation (M8.4a) injected into personable skills.
         self.personality = personality
+        #: Optional learned user profile (M3) injected into personable skills so
+        #: LLM answers reflect what MimOSA has learned about the user.
+        self.user_profile = user_profile
         #: Optional :class:`~mimosa.core.error_reporter.ErrorReporter` (M8.1).
         #: When present, failed skill results carry a friendly message and, if
         #: the M7.3 learner knows one, a previously-successful fix suggestion.
@@ -346,10 +350,12 @@ class IntentRouter:
                 ApplicationSkill(),
                 SystemControlSkill(),
                 SystemInfoSkill(),
-                GreetingSkill(llm_provider=llm_provider, personality=personality),
+                GreetingSkill(llm_provider=llm_provider, personality=personality,
+                              user_profile=user_profile),
                 ResearchSkill(llm_provider=llm_provider),
                 TaskControlSkill(),
-                QuestionSkill(llm_provider=llm_provider, personality=personality),
+                QuestionSkill(llm_provider=llm_provider, personality=personality,
+                              user_profile=user_profile),
             ]
         self._skills: List[BaseSkill] = []
         self._by_intent: Dict[str, BaseSkill] = {}
@@ -370,6 +376,20 @@ class IntentRouter:
         if isinstance(skill, CustomSkill) and skill not in self._custom_skills:
             self._custom_skills.append(skill)
         logger.debug("Registered skill %r for intents %s", skill.name, skill.intents)
+
+    def set_user_profile(self, user_profile) -> None:
+        """Inject/refresh the learned user profile into personable skills (M3).
+
+        Called after onboarding completes (or the profile is edited) so live
+        LLM-backed skills immediately reflect what MimOSA knows. Best-effort.
+        """
+        self.user_profile = user_profile
+        for skill in self._skills:
+            if hasattr(skill, "user_profile"):
+                try:
+                    skill.user_profile = user_profile
+                except Exception:  # pragma: no cover - defensive
+                    logger.debug("Could not set profile on %r", skill)
 
     def set_custom_skills(self, custom_skills: List[CustomSkill]) -> None:
         """Replace the active set of custom skills (M4.1).

@@ -52,7 +52,9 @@ def build_system_prompt(
     task_instructions: str,
     *,
     personality: Optional[object] = None,
+    user_profile: Optional[object] = None,
     include_tone: bool = True,
+    relationship_note: Optional[str] = None,
 ) -> str:
     """Compose a full system prompt: identity + tone + task + personalisation.
 
@@ -62,8 +64,19 @@ def build_system_prompt(
         personality: Optional :class:`~mimosa.utils.config.PersonalitySettings`.
             When provided, MimOSA adopts the user's chosen assistant name,
             addresses the user by name, and matches the requested verbosity.
+        user_profile: Optional learned user profile (a ``dict`` matching the
+            :class:`~mimosa.memory.profile_manager.UserProfile` shape, or any
+            object exposing ``to_prompt_summary()``). When present, the facts
+            MimOSA has learned about the user are injected so every interaction
+            is personalised. Always optional and degrades gracefully.
         include_tone: Whether to include the natural-tone guidance (on by
             default; the only reason to omit it is a non-conversational task).
+        relationship_note: Optional guidance describing how close MimOSA and
+            the user have grown (from
+            :meth:`~mimosa.memory.relationship_tracker.RelationshipTracker.tone_guidance`).
+            When present, it nudges MimOSA's warmth to match the relationship
+            stage (new -> familiar -> close). Always optional; an empty or
+            ``None`` value is ignored.
 
     Returns:
         A single system-prompt string ready to send as a ``Role.SYSTEM``
@@ -77,7 +90,90 @@ def build_system_prompt(
     extras = _personalization_clause(personality)
     if extras:
         parts.append(extras)
+    profile_clause = _profile_clause(user_profile)
+    if profile_clause:
+        parts.append(profile_clause)
+    rel_clause = _relationship_clause(relationship_note)
+    if rel_clause:
+        parts.append(rel_clause)
     return " ".join(p.strip() for p in parts if p and p.strip())
+
+
+def _relationship_clause(relationship_note: Optional[str]) -> str:
+    """Render the relationship tone guidance into a prompt fragment.
+
+    Never raises -- on any problem it returns an empty string so the prompt is
+    still well-formed.
+    """
+    try:
+        note = (relationship_note or "").strip()
+        return note
+    except Exception:  # pragma: no cover - defensive
+        return ""
+
+
+def _profile_clause(user_profile: Optional[object]) -> str:
+    """Render the learned user profile into a natural prompt fragment.
+
+    Accepts either an object with a ``to_prompt_summary()`` method (the
+    :class:`~mimosa.memory.profile_manager.UserProfile`) or a plain ``dict``.
+    Never raises -- on any problem it returns an empty string so the prompt is
+    still well-formed.
+    """
+    if user_profile is None:
+        return ""
+    try:
+        summary = ""
+        to_summary = getattr(user_profile, "to_prompt_summary", None)
+        if callable(to_summary):
+            summary = to_summary() or ""
+        elif isinstance(user_profile, dict):
+            summary = _summarize_profile_dict(user_profile)
+        summary = (summary or "").strip()
+        if not summary:
+            return ""
+        return (
+            "Here is what you've learned about the user so far; use it to "
+            "personalise your help, but weave it in naturally and never recite "
+            "it back like a list: " + summary
+        )
+    except Exception:  # pragma: no cover - defensive
+        return ""
+
+
+def _summarize_profile_dict(profile: dict) -> str:
+    """Build a compact, human-readable summary from a profile dict."""
+    prof = profile.get("user_profile", profile) if isinstance(profile, dict) else {}
+    if not isinstance(prof, dict):
+        return ""
+    bits = []
+
+    def _add(label: str, value) -> None:
+        if not value:
+            return
+        if isinstance(value, (list, tuple)):
+            items = [str(v).strip() for v in value if str(v).strip()]
+            if items:
+                bits.append(f"{label}: {', '.join(items)}")
+        elif isinstance(value, dict):
+            pairs = [f"{k} {v}" for k, v in value.items() if v]
+            if pairs:
+                bits.append(f"{label}: {', '.join(pairs)}")
+        else:
+            text = str(value).strip()
+            if text:
+                bits.append(f"{label}: {text}")
+
+    _add("Name", prof.get("name"))
+    _add("Occupation", prof.get("occupation"))
+    _add("Skills", prof.get("skills"))
+    _add("Tools", prof.get("tools"))
+    _add("Interests", prof.get("interests"))
+    _add("Preferences", prof.get("preferences"))
+    _add("Schedule", prof.get("schedule"))
+    _add("Relationships", prof.get("relationships"))
+    _add("Goals", prof.get("goals"))
+    return ". ".join(bits)
 
 
 def _personalization_clause(personality: Optional[object]) -> str:

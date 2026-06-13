@@ -24,6 +24,7 @@ from mimosa.ui.setup_wizard import (
     STEP_LLM,
     STEP_MICROPHONE,
     STEP_SPEAKER,
+    STEP_WAKEWORD,
     SetupWizardController,
     WizardStep,
 )
@@ -73,14 +74,25 @@ if HAS_GTK:
             self.set_modal(True)
             if transient_for is not None:
                 self.set_transient_for(transient_for)
-            self.set_default_size(480, 420)
+            self.set_default_size(720, 460)
+
+            # Outermost layout: a persistent informative sidebar on the left and
+            # the step content on the right. The sidebar (M2) replaces the old
+            # per-field info-icon tooltips — the "what & why" help for each step
+            # is now always visible instead of hidden behind a hover.
+            outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            self.set_child(outer)
+
+            sidebar = self._build_sidebar()
+            outer.append(sidebar)
 
             root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
             root.set_margin_top(18)
             root.set_margin_bottom(18)
             root.set_margin_start(18)
             root.set_margin_end(18)
-            self.set_child(root)
+            root.set_hexpand(True)
+            outer.append(root)
 
             self._title = Gtk.Label(xalign=0)
             self._title.add_css_class("title-2")
@@ -111,6 +123,37 @@ if HAS_GTK:
             self.connect("close-request", self._on_close_request)
 
             self._render()
+
+        def _build_sidebar(self):
+            """Build the persistent left-hand guidance panel.
+
+            Returns a styled, fixed-width box whose label is refreshed in
+            :meth:`_render` with the current step's ``sidebar`` text. This is the
+            M2 replacement for the per-field info-icon tooltips.
+            """
+            panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+            panel.set_size_request(240, -1)
+            panel.add_css_class("sidebar")
+            panel.set_margin_top(18)
+            panel.set_margin_bottom(18)
+            panel.set_margin_start(18)
+            panel.set_margin_end(18)
+
+            heading = Gtk.Label(label="MimOSA Setup", xalign=0)
+            heading.add_css_class("title-4")
+            panel.append(heading)
+
+            # Scrollable so longer guidance never clips on small screens.
+            scroller = Gtk.ScrolledWindow()
+            scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            scroller.set_vexpand(True)
+            self._sidebar_label = Gtk.Label(xalign=0, yalign=0, wrap=True)
+            self._sidebar_label.add_css_class("dim-label")
+            self._sidebar_label.set_max_width_chars(32)
+            scroller.set_child(self._sidebar_label)
+            panel.append(scroller)
+
+            return panel
 
         def _on_close_request(self, *_args) -> bool:
             if not self._controller.finished:
@@ -161,6 +204,9 @@ if HAS_GTK:
             step: WizardStep = self._controller.current_step
             self._title.set_text(step.title)
             self._body.set_text(step.body)
+            # Refresh the persistent guidance panel for this step.
+            if getattr(self, "_sidebar_label", None) is not None:
+                self._sidebar_label.set_text(step.sidebar or "")
             self._progress.set_fraction(self._controller.progress())
             self._progress.set_text(f"Step {self._controller.index + 1} "
                                     f"of {self._controller.step_count}")
@@ -180,6 +226,8 @@ if HAS_GTK:
                 self._render_speaker()
             elif step.step_id == STEP_LLM:
                 self._render_llm()
+            elif step.step_id == STEP_WAKEWORD:
+                self._render_wakeword()
             elif step.step_id == STEP_FINISH:
                 self._render_finish()
             else:
@@ -513,6 +561,101 @@ if HAS_GTK:
             """Called when the user tries to advance without a valid choice."""
             self._update_llm_status()
 
+        # -- wake-word step (custom UI) ------------------------------------
+
+        def _render_wakeword(self) -> None:
+            """Build the custom wake-word name entry, live analysis & choice."""
+            self._ww_analysis_seq = 0
+
+            # Name entry.
+            entry_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            entry_row.append(Gtk.Label(label="Wake word", xalign=0))
+            entry_row.append(Gtk.Box(hexpand=True))
+            self._ww_entry = Gtk.Entry()
+            self._ww_entry.set_placeholder_text("e.g. Jarvis")
+            self._ww_entry.set_hexpand(True)
+            self._ww_entry.set_text(self._controller.get_custom_wake_word_name() or "")
+            self._ww_entry.connect("changed", self._on_ww_name_changed)
+            entry_row.append(self._ww_entry)
+            self._fields_box.append(entry_row)
+
+            # Live analysis card.
+            self._ww_analysis = Gtk.Label(xalign=0, wrap=True)
+            self._ww_analysis.add_css_class("dim-label")
+            self._ww_analysis.set_margin_top(4)
+            self._fields_box.append(self._ww_analysis)
+
+            self._fields_box.append(Gtk.Separator(
+                orientation=Gtk.Orientation.HORIZONTAL))
+
+            # Training-preference radios.
+            prompt = Gtk.Label(label="How would you like to set this up?",
+                               xalign=0)
+            prompt.set_margin_top(4)
+            self._fields_box.append(prompt)
+
+            self._ww_pref_radios = {}
+            current_pref = self._controller.get_training_preference()
+            group_leader = None
+            for key, label, desc in self._controller.training_preference_options():
+                radio = Gtk.CheckButton(label=label)
+                if group_leader is None:
+                    group_leader = radio
+                else:
+                    radio.set_group(group_leader)
+                if key == current_pref:
+                    radio.set_active(True)
+                radio.connect("toggled", self._on_ww_pref_toggled, key)
+                self._fields_box.append(radio)
+                sub = Gtk.Label(label=desc, xalign=0, wrap=True)
+                sub.add_css_class("dim-label")
+                sub.set_margin_start(28)
+                self._fields_box.append(sub)
+                self._ww_pref_radios[key] = radio
+
+            # Render the initial analysis (for any pre-filled name).
+            self._refresh_ww_analysis()
+
+        def _on_ww_name_changed(self, entry) -> None:
+            name = entry.get_text()
+            self._controller.set_custom_wake_word_name(name)
+            self._refresh_ww_analysis()
+            # Typing a name nudges the choice toward training if still on the
+            # default "mimosa" preference, so the entry doesn't feel ignored.
+
+        def _on_ww_pref_toggled(self, radio, key) -> None:
+            if not radio.get_active():
+                return
+            self._controller.set_training_preference(key)
+
+        def _refresh_ww_analysis(self) -> None:
+            """Recompute and display the analysis for the current name."""
+            name = (self._ww_entry.get_text() or "").strip()
+            if not name:
+                self._ww_analysis.set_text(
+                    "Type a name above and I'll tell you how well it'll work."
+                )
+                return
+            analysis = self._controller.analyze_custom_name(name)
+            cap = self._controller.hardware_capability()
+            try:
+                time_text = analysis.estimated_time_text(cap)
+            except Exception:
+                time_text = "a little while"
+            difficulty = analysis["difficulty"]
+            prob = int(round(float(analysis["success_probability"]) * 100))
+            lines = [
+                f"“{name}” — {difficulty.title()} to train "
+                f"(~{prob}% success).",
+                analysis["phonetic_analysis"].get("summary", ""),
+                f"Estimated training time: {time_text}.",
+            ]
+            for warning in analysis["warnings"]:
+                lines.append(f"⚠ {warning}")
+            if analysis.get("recommendation"):
+                lines.append(analysis["recommendation"])
+            self._ww_analysis.set_text("\n".join(p for p in lines if p))
+
         # -- finish step (custom UI) ---------------------------------------
 
         def _render_finish(self) -> None:
@@ -533,21 +676,13 @@ if HAS_GTK:
             self._fields_box.append(check)
 
         def _build_field(self, spec):
+            # M2: the per-field info-icon + hover tooltip has been removed in
+            # favour of the always-visible guidance sidebar. The field row now
+            # carries just its label and editing widget; the "what & why" help
+            # for every option lives in the step's sidebar text.
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
             label = Gtk.Label(label=spec.label, xalign=0)
             row.append(label)
-            # Info icon (ℹ️) with a hover tooltip explaining the option. The
-            # help text is authored on each FieldSpec; surfacing it here means
-            # newcomers can hover to learn what an option does and why.
-            if getattr(spec, "help", ""):
-                info = Gtk.Image.new_from_icon_name("help-about-symbolic")
-                info.set_tooltip_text(spec.help)
-                info.add_css_class("dim-label")
-                row.append(info)
-                # Also put the tooltip on the label/row so the whole line is
-                # discoverable, not just the small icon.
-                label.set_tooltip_text(spec.help)
-                row.set_tooltip_text(spec.help)
             # Spacer pushes the editing widget to the right edge.
             row.append(Gtk.Box(hexpand=True))
             value = self._controller.get_value(spec.section, spec.name)

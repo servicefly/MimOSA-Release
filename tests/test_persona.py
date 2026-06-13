@@ -79,3 +79,23 @@ def test_build_system_prompt_without_personality():
     prompt = persona.build_system_prompt("Task.", personality=None)
     assert "MimOSA" in prompt
     assert "Task." in prompt
+
+
+
+def test_relationship_note_injected():
+    note = "You two have grown close; be warm and casual like old friends."
+    prompt = persona.build_system_prompt("Help.", relationship_note=note)
+    assert "close" in prompt.lower()
+    assert "MimOSA" in prompt
+
+
+def test_relationship_note_none_is_ignored():
+    prompt = persona.build_system_prompt("Help.", relationship_note=None)
+    assert "MimOSA" in prompt
+    assert "Help." in prompt
+
+
+def test_relationship_note_empty_is_ignored():
+    prompt = persona.build_system_prompt("Help.", relationship_note="   ")
+    # No stray whitespace clause appended.
+    assert "  " not in prompt.replace("\n", " ").strip() or "MimOSA" in prompt

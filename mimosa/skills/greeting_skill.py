@@ -49,13 +49,16 @@ class GreetingSkill(BaseSkill):
     uses_llm = True
 
     def __init__(self, llm_provider=None, max_tokens: int = 64,
-                 personality=None) -> None:
+                 personality=None, user_profile=None) -> None:
         super().__init__(llm_provider=llm_provider)
         self.max_tokens = max_tokens
         #: Optional :class:`~mimosa.utils.config.PersonalitySettings` from the
         #: "Get to Know MimOSA" setup step. When present, greetings address the
         #: user by name and adopt the chosen assistant name.
         self.personality = personality
+        #: Optional learned :class:`~mimosa.memory.profile_manager.UserProfile`
+        #: (M3) injected so greetings reflect what MimOSA knows about the user.
+        self.user_profile = user_profile
 
     def _fallback_reply(self) -> str:
         """A friendly local greeting, personalised when we know the user."""
@@ -65,10 +68,12 @@ class GreetingSkill(BaseSkill):
         return random.choice(_FALLBACK_REPLIES)
 
     def _system_prompt(self) -> str:
-        if self.personality is None:
+        if self.personality is None and self.user_profile is None:
             return GREETING_SYSTEM_PROMPT
         return build_system_prompt(
-            GREETING_TASK_INSTRUCTIONS, personality=self.personality
+            GREETING_TASK_INSTRUCTIONS,
+            personality=self.personality,
+            user_profile=self.user_profile,
         )
 
     def handle(self, text: str, context: Optional[List] = None) -> SkillResult:

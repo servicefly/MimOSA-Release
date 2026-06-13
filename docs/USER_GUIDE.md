@@ -199,6 +199,37 @@ Conversation: history disabled. All settings stored locally; no telemetry."*
 
 ---
 
+## Learning
+
+MimOSA keeps getting to know you over time. This page (new in **v1.1.0**) lets you
+tune that behaviour. Everything here is **local-only** and **opt-out** — turning
+anything off never disables core features. See
+[`CONTINUOUS_LEARNING.md`](CONTINUOUS_LEARNING.md) for the full story.
+
+**Learning Preferences**
+
+- **Allow proactive questions** — let MimOSA occasionally ask a thoughtful
+  "get to know you" question. Rate-limited to one or two per day; never repeats.
+- **Question frequency** — `rarely`, `balanced` (default) or `often`.
+- **Proactive suggestions** — high-confidence, context-aware nudges
+  ("you usually start coding around now…"). Off-switchable.
+- **Learn from conversations** — extract facts/preferences from everyday chat
+  (not just onboarding). Turn off to keep learning to onboarding only.
+
+**Memory Management**
+
+- **View my memory** — see what MimOSA has learned: profile, detected patterns,
+  relationship stage and the questions it has already asked.
+- **Consolidate now** — run a deep clean-up pass that merges duplicate memories
+  and reconciles contradictions (newer wins).
+
+**Relationship**
+
+- A friendly readout of your current stage — **new**, **familiar** or **close** —
+  which gently shapes how warm and familiar MimOSA sounds.
+
+---
+
 ## Appearance
 
 Avatar look-and-feel. Changes here are **previewed live** on the avatar when you

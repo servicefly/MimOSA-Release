@@ -38,6 +38,7 @@ from mimosa.utils.config import (
     MIN_WAKE_SENSITIVITY,
     RESEARCH_BACKENDS,
     VALID_GENDERS,
+    VALID_QUESTION_FREQUENCIES,
     VALID_VERBOSITY,
     WHISPER_MODELS,
 )
@@ -101,6 +102,7 @@ PAGE_PRIVACY = "privacy"
 PAGE_TASKS = "tasks"
 PAGE_RESEARCH = "research"
 PAGE_UI = "ui"
+PAGE_LEARNING = "learning"
 PAGE_ABOUT = "about"
 
 
@@ -260,8 +262,29 @@ def build_page_specs() -> Tuple[PageSpec, ...]:
                       help="Remember per-topic cost/budget patterns (local only)."),
         ),
     )
+    learning = PageSpec(
+        PAGE_LEARNING, "Learning & Memory", "emblem-favorite-symbolic",
+        fields=(
+            FieldSpec("learning", "learn_from_conversations",
+                      "Learn from our conversations", "bool",
+                      help="Let MimOSA quietly pick up facts and preferences as "
+                           "you chat (always local, never shared)."),
+            FieldSpec("learning", "allow_questions",
+                      "Let me ask the occasional question", "bool",
+                      help="Allow MimOSA to ask a friendly follow-up now and then "
+                           "to get to know you better."),
+            FieldSpec("learning", "question_frequency", "How often I can ask",
+                      "choice", choices=VALID_QUESTION_FREQUENCIES,
+                      help="'rarely' = at most one a day; 'often' = a few a day."),
+            FieldSpec("learning", "proactive_suggestions",
+                      "Offer helpful suggestions", "bool",
+                      help="Let MimOSA gently suggest things based on your "
+                           "habits (e.g. opening a tool you use every morning)."),
+        ),
+    )
     about = PageSpec(PAGE_ABOUT, "About", "help-about-symbolic", fields=())
-    return (voice, personalize, skills, system, privacy, tasks, research, ui, about)
+    return (voice, personalize, skills, system, privacy, tasks, research, ui,
+            learning, about)
 
 
 # ---------------------------------------------------------------------------

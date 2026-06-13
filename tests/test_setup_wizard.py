@@ -18,6 +18,7 @@ from mimosa.ui.setup_wizard import (
     STEP_SPEAKER,
     STEP_SYSTEM,
     STEP_VOICE,
+    STEP_WAKEWORD,
     STEP_WELCOME,
     LLMProviderOption,
     MicrophoneChoice,
@@ -45,7 +46,8 @@ def test_build_wizard_steps_order():
     steps = build_wizard_steps()
     assert [s.step_id for s in steps] == [
         STEP_WELCOME, STEP_MICROPHONE, STEP_SPEAKER, STEP_LLM,
-        STEP_PERSONALIZE, STEP_VOICE, STEP_PRIVACY, STEP_SYSTEM, STEP_FINISH
+        STEP_PERSONALIZE, STEP_VOICE, STEP_WAKEWORD, STEP_PRIVACY, STEP_SYSTEM,
+        STEP_FINISH
     ]
     assert all(isinstance(s, WizardStep) for s in steps)
 
@@ -54,6 +56,12 @@ def test_steps_have_titles_and_bodies():
     for s in build_wizard_steps():
         assert s.title
         assert s.body
+
+
+def test_every_step_has_sidebar_guidance():
+    # M2: the per-field info tooltips were replaced by an always-visible sidebar.
+    for s in build_wizard_steps():
+        assert s.sidebar, f"step {s.step_id} is missing sidebar guidance"
 
 
 # ---------------------------------------------------------------------------
@@ -503,3 +511,73 @@ def test_create_desktop_shortcut_prefers_installed_entry(
     assert w.create_desktop_shortcut() is True
     shortcut = tmp_path / "Desktop" / "mimosa.desktop"
     assert "MimOSA Installed" in shortcut.read_text()
+
+
+
+# ---------------------------------------------------------------------------
+# Milestone 2: custom wake-word step controller logic
+# ---------------------------------------------------------------------------
+
+def test_wakeword_step_present_with_sidebar():
+    steps = {s.step_id: s for s in build_wizard_steps()}
+    assert STEP_WAKEWORD in steps
+    assert steps[STEP_WAKEWORD].sidebar
+
+
+def test_analyze_custom_name_returns_analysis(manager):
+    w = SetupWizardController(manager)
+    analysis = w.analyze_custom_name("Jarvis")
+    assert analysis.difficulty
+    assert 0.0 <= analysis.success_probability <= 1.0
+    assert analysis.is_trainable is True
+
+
+def test_analyze_custom_name_never_raises_on_empty(manager):
+    w = SetupWizardController(manager)
+    analysis = w.analyze_custom_name("")
+    assert analysis.is_trainable is False
+
+
+def test_custom_wake_word_name_round_trip(manager):
+    w = SetupWizardController(manager)
+    assert w.get_custom_wake_word_name() == ""
+    w.set_custom_wake_word_name("  Jarvis  ")
+    assert w.get_custom_wake_word_name() == "Jarvis"  # trimmed
+
+
+def test_training_preference_defaults_to_mimosa(manager):
+    w = SetupWizardController(manager)
+    assert w.get_training_preference() == "mimosa"
+
+
+def test_set_training_preference_validates(manager):
+    w = SetupWizardController(manager)
+    assert w.set_training_preference("now") == "now"
+    assert w.get_training_preference() == "now"
+    # invalid falls back to the safe default
+    assert w.set_training_preference("bogus") == "mimosa"
+
+
+def test_training_preference_options_has_three_choices(manager):
+    w = SetupWizardController(manager)
+    options = w.training_preference_options()
+    keys = [key for key, _label, _desc in options]
+    assert set(keys) == {"now", "later", "mimosa"}
+    for _key, label, desc in options:
+        assert label and desc
+
+
+def test_wants_training_now_requires_name_and_pref(manager):
+    w = SetupWizardController(manager)
+    assert w.wants_training_now() is False
+    w.set_training_preference("now")
+    assert w.wants_training_now() is False  # no name yet
+    w.set_custom_wake_word_name("Jarvis")
+    assert w.wants_training_now() is True
+    w.set_training_preference("later")
+    assert w.wants_training_now() is False
+
+
+def test_hardware_capability_returns_string(manager):
+    w = SetupWizardController(manager)
+    assert isinstance(w.hardware_capability(), str)

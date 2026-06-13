@@ -44,13 +44,13 @@ The built package is written to the parent directory and copied to
 `packaging/dist/` for convenience, e.g.:
 
 ```
-packaging/dist/mimosa-assistant_1.0.0~rc2-1_all.deb
+packaging/dist/mimosa-assistant_1.1.0-1_all.deb
 ```
 
 ## Install it
 
 ```bash
-sudo apt install ./packaging/dist/mimosa-assistant_1.0.0~rc2-1_all.deb
+sudo apt install ./packaging/dist/mimosa-assistant_1.1.0-1_all.deb
 ```
 
 Using `apt install ./file.deb` (rather than `dpkg -i`) lets apt resolve and

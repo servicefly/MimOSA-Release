@@ -22,12 +22,15 @@ from typing import Any, List, Optional, Tuple
 from mimosa.utils.config import (
     AppConfig,
     AppConfigManager,
+    DEFAULT_TRAINING_PREFERENCE,
+    DEFAULT_WAKE_WORD,
     LLM_PROVIDERS_REQUIRING_KEY,
     MAX_HISTORY_LIMIT,
     MAX_WAKE_SENSITIVITY,
     MIN_HISTORY_LIMIT,
     MIN_WAKE_SENSITIVITY,
     VALID_GENDERS,
+    VALID_TRAINING_PREFERENCES,
     VALID_VERBOSITY,
     WHISPER_MODELS,
 )
@@ -42,6 +45,7 @@ STEP_SPEAKER = "speaker"
 STEP_LLM = "llm"
 STEP_PERSONALIZE = "personalize"
 STEP_VOICE = "voice"
+STEP_WAKEWORD = "wakeword"
 STEP_PRIVACY = "privacy"
 STEP_SYSTEM = "system"
 STEP_FINISH = "finish"
@@ -140,22 +144,52 @@ OLLAMA_INSTALL_URL = "https://ollama.com/download"
 
 @dataclass(frozen=True)
 class WizardStep:
-    """One screen of the wizard: an id, a title, body text, and its fields."""
+    """One screen of the wizard: an id, a title, body text, and its fields.
+
+    Attributes:
+        step_id: Stable identifier (one of the ``STEP_*`` constants).
+        title: Heading shown at the top of the step.
+        body: Short introductory paragraph for the step.
+        fields: Declarative editable fields (rendered by the view). Custom steps
+            (microphone/speaker/llm/wakeword/finish) leave this empty and supply
+            their own widgets.
+        sidebar: Persistent, friendly "what & why" guidance shown in the wizard's
+            side panel for this step. Replaces the old per-field info-icon
+            tooltips (M2): the help that used to hide behind a hover is now always
+            visible alongside the step. Markup-free plain text.
+    """
 
     step_id: str
     title: str
     body: str
     fields: Tuple[FieldSpec, ...] = ()
+    sidebar: str = ""
 
 
 def build_wizard_steps() -> Tuple[WizardStep, ...]:
-    """Return the ordered wizard steps (declarative; rendered by the view)."""
+    """Return the ordered wizard steps (declarative; rendered by the view).
+
+    Every step carries a ``sidebar`` string: warm, always-visible guidance shown
+    in the wizard's side panel. This replaces the old per-field info-icon
+    tooltips — the same "what & why" help is now in plain sight instead of hidden
+    behind a hover.
+    """
     welcome = WizardStep(
         STEP_WELCOME,
         "Welcome to MimOSA",
         "MimOSA is your private, local-first voice assistant. This quick setup "
         "tunes a few preferences. Nothing you enter ever leaves your device.",
         fields=(),
+        sidebar=(
+            "👋 Hi there!\n\n"
+            "I'm MimOSA — your own voice assistant that runs entirely on your "
+            "computer.\n\n"
+            "This setup takes about a minute. I'll walk you through each step "
+            "right here in this panel, so you always know what's going on and "
+            "why it matters.\n\n"
+            "Your privacy comes first: nothing you tell me here ever leaves "
+            "your device."
+        ),
     )
     microphone = WizardStep(
         STEP_MICROPHONE,
@@ -166,6 +200,16 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         # Rendered with a custom dropdown + test meter by the dialog, so no
         # declarative fields here.
         fields=(),
+        sidebar=(
+            "🎤 Your ears\n\n"
+            "This is the microphone I'll use to hear you. If you've got a "
+            "headset or a USB mic, pick it here — otherwise the system default "
+            "is usually fine.\n\n"
+            "Tip: click \"Test Microphone\" and say a few words. The meter "
+            "should jump as you speak. If it stays flat, the mic may be muted "
+            "or set wrong.\n\n"
+            "You can always change this later in Settings."
+        ),
     )
     speaker = WizardStep(
         STEP_SPEAKER,
@@ -176,6 +220,14 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "later in Settings.",
         # Rendered with a custom dropdown + test button by the dialog.
         fields=(),
+        sidebar=(
+            "🔊 My voice\n\n"
+            "This is where I'll speak to you. Choose your headphones or "
+            "speakers — or leave it on the system default.\n\n"
+            "Click \"Test Speaker\" to hear a short chime. If you hear it, "
+            "you're good to go!\n\n"
+            "You can change this anytime in Settings."
+        ),
     )
     llm = WizardStep(
         STEP_LLM,
@@ -186,6 +238,18 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "This step is required so MimOSA can think.",
         # Rendered with custom radio buttons + masked key entry by the dialog.
         fields=(),
+        sidebar=(
+            "🧠 My thinking\n\n"
+            "I need a language model to understand you and answer well. This is "
+            "the one part that can reach out beyond your device — and it's your "
+            "choice how.\n\n"
+            "• Abacus.AI — easiest: paste one key and you're set.\n"
+            "• OpenAI / Anthropic — use your own key.\n"
+            "• Local Ollama — runs fully on your machine, totally private. No "
+            "key needed.\n\n"
+            "This step is required so I can think. Your key is stored only on "
+            "your device."
+        ),
     )
     personalize = WizardStep(
         STEP_PERSONALIZE,
@@ -215,6 +279,17 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
                       "bool",
                       help="Say hello using your name when MimOSA starts."),
         ),
+        sidebar=(
+            "😊 Let's get acquainted\n\n"
+            "Tell me a little about you so I can feel more like a friend than a "
+            "tool. Everything here is optional and stays on your device.\n\n"
+            "• What should I call you? — I'll greet you by name.\n"
+            "• What to call me — give me a name if you like (default: MimOSA).\n"
+            "• Pronouns — only used to phrase things naturally.\n"
+            "• How chatty — brief answers or more detail.\n"
+            "• Voice style — neutral, female or male voice for me.\n\n"
+            "None of this is set in stone — tweak it anytime in Settings."
+        ),
     )
     voice = WizardStep(
         STEP_VOICE,
@@ -234,6 +309,40 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
                       help="The model that turns your speech into text. Larger "
                            "models hear more accurately but run slower on your PC."),
         ),
+        sidebar=(
+            "👂 How I listen\n\n"
+            "• Wake word — the phrase that wakes me up. I stay asleep (and "
+            "private) until I hear it. The default is \"hey mimosa\".\n\n"
+            "• Sensitivity — how eager I am to wake. Higher wakes more easily "
+            "but may trigger by accident; lower is stricter.\n\n"
+            "• Speech-to-text model — bigger models hear more accurately but "
+            "run slower. Start small and bump it up if you like.\n\n"
+            "Want a totally custom wake word like \"Jarvis\"? That's the very "
+            "next step!"
+        ),
+    )
+    wakeword = WizardStep(
+        STEP_WAKEWORD,
+        "Your Own Wake Word",
+        "Want me to answer to a name of your choosing — like \"Jarvis\" or "
+        "\"Computer\"? I can train a personal wake-word model right on your "
+        "machine. It's completely optional: \"Hey MimOSA\" always works.",
+        # Rendered with a custom name entry + live analysis + choice by the
+        # dialog.
+        fields=(),
+        sidebar=(
+            "✨ Make me yours\n\n"
+            "Type a name and I'll instantly tell you how well it'll work as a "
+            "wake word — how distinctive it is, how likely training is to "
+            "succeed, and roughly how long it'll take on your hardware.\n\n"
+            "Good wake words are two or three syllables and don't sound like "
+            "everyday words (so I don't wake up by accident).\n\n"
+            "Then choose:\n"
+            "• Train now — set it up right after setup.\n"
+            "• Train later — I'll remind you; you can do it from Settings.\n"
+            "• Keep \"Hey MimOSA\" — no training needed.\n\n"
+            "Either way, \"Hey MimOSA\" keeps working as a safe fallback."
+        ),
     )
     privacy = WizardStep(
         STEP_PRIVACY,
@@ -246,6 +355,15 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
             FieldSpec("privacy", "conversation_history_limit", "History limit",
                       "int", minimum=MIN_HISTORY_LIMIT, maximum=MAX_HISTORY_LIMIT,
                       step=1, help="How many turns to keep for context."),
+        ),
+        sidebar=(
+            "🔒 Your privacy\n\n"
+            "I'm private by design. Conversation history lives only in memory "
+            "to help me follow context — it's never written to disk.\n\n"
+            "• Remember conversation — lets me recall what we just talked "
+            "about. Turn it off for a clean slate every time.\n"
+            "• History limit — how many recent turns to keep in mind.\n\n"
+            "You're always in control of what I remember."
         ),
     )
     system = WizardStep(
@@ -270,6 +388,16 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
                       help="Asks you to confirm before anything destructive (deleting "
                            "files, changing system settings). Keeps you in control."),
         ),
+        sidebar=(
+            "🛠️ What I can do\n\n"
+            "Decide how much I'm allowed to help with on your computer. Each is "
+            "off-limits unless you switch it on.\n\n"
+            "• File operations — find, open and organise files you ask about.\n"
+            "• Application control — open and close apps by voice.\n"
+            "• System controls — volume, brightness, Wi-Fi, battery.\n"
+            "• Safe mode — I'll always confirm before anything destructive. "
+            "Leave this on; it keeps you firmly in control."
+        ),
     )
     finish = WizardStep(
         STEP_FINISH,
@@ -277,9 +405,18 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
         "You're ready to go. MimOSA will start listening for your wake word. "
         "Open Settings anytime to fine-tune things.",
         fields=(),
+        sidebar=(
+            "🎉 You're all set!\n\n"
+            "That's everything — thank you! I'll start listening for your wake "
+            "word right away.\n\n"
+            "If you chose to train a custom wake word, we'll get started as "
+            "soon as you finish here.\n\n"
+            "Everything you set today can be changed anytime in Settings. "
+            "Talk soon!"
+        ),
     )
-    return (welcome, microphone, speaker, llm, personalize, voice, privacy,
-            system, finish)
+    return (welcome, microphone, speaker, llm, personalize, voice, wakeword,
+            privacy, system, finish)
 
 
 class SetupWizardController:
@@ -632,6 +769,70 @@ class SetupWizardController:
             return self.detect_ollama()
         # "local"/"none" or anything else: nothing more required.
         return True
+
+    # -- custom wake word (STEP_WAKEWORD) ----------------------------------
+
+    def hardware_capability(self) -> str:
+        """Return the detected hardware capability level (``"gpu"``/``"cpu"``/...).
+
+        Read from the working config's hardware section; used to tailor the
+        training-time estimate shown beside a candidate wake word.
+        """
+        return getattr(self._working.hardware, "capability_level", "") or ""
+
+    def analyze_custom_name(self, name: str):
+        """Analyse a candidate wake word and return a :class:`NameAnalysis`.
+
+        Pure, dependency-light logic (no heavy ML imports). Never raises -- on
+        any unexpected error it returns a conservative "very hard / not
+        trainable" analysis so the view can always render something friendly.
+        """
+        from mimosa.training import analyze_wake_word
+
+        try:
+            return analyze_wake_word(name, self.hardware_capability())
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Wake-word analysis failed for %r", name, exc_info=True)
+            return analyze_wake_word("", self.hardware_capability())
+
+    def get_custom_wake_word_name(self) -> str:
+        """Return the working-copy custom wake-word name (may be empty)."""
+        return self._working.voice.custom_wake_word_name or ""
+
+    def set_custom_wake_word_name(self, name: str) -> str:
+        """Store the chosen custom wake-word name (trimmed). Returns it."""
+        return self.set_value("voice", "custom_wake_word_name", (name or "").strip())
+
+    def get_training_preference(self) -> str:
+        """Return the working-copy training preference (mimosa/now/later)."""
+        return self._working.voice.training_preference or DEFAULT_TRAINING_PREFERENCE
+
+    def set_training_preference(self, preference: str) -> str:
+        """Set the training preference; invalid values fall back to default.
+
+        Returns the stored (validated) preference.
+        """
+        pref = (preference or "").strip().lower()
+        if pref not in VALID_TRAINING_PREFERENCES:
+            pref = DEFAULT_TRAINING_PREFERENCE
+        return self.set_value("voice", "training_preference", pref)
+
+    def training_preference_options(self) -> Tuple[Tuple[str, str, str], ...]:
+        """Return ``(key, label, description)`` triples for the wake-word step."""
+        return (
+            ("now", "Train it now",
+             "Set up your custom wake word right after this wizard finishes."),
+            ("later", "Train it later",
+             "Keep \"Hey MimOSA\" for now; train your wake word anytime from "
+             "Settings."),
+            ("mimosa", "Just use \"Hey MimOSA\"",
+             "No training needed — the built-in wake word works out of the box."),
+        )
+
+    def wants_training_now(self) -> bool:
+        """Whether the user opted to train their custom wake word immediately."""
+        return (self.get_training_preference() == "now"
+                and bool(self.get_custom_wake_word_name()))
 
     # -- completion --------------------------------------------------------
 
