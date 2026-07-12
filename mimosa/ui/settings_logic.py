@@ -37,6 +37,7 @@ from mimosa.utils.config import (
     MIN_TTS_SPEED,
     MIN_WAKE_SENSITIVITY,
     RESEARCH_BACKENDS,
+    VALID_AVATAR_TIERS,
     VALID_GENDERS,
     VALID_QUESTION_FREQUENCIES,
     VALID_VERBOSITY,
@@ -102,8 +103,23 @@ PAGE_PRIVACY = "privacy"
 PAGE_TASKS = "tasks"
 PAGE_RESEARCH = "research"
 PAGE_UI = "ui"
+PAGE_AVATAR = "avatar"
 PAGE_LEARNING = "learning"
 PAGE_ABOUT = "about"
+
+
+def _avatar_voice_choices() -> Tuple[str, ...]:
+    """Voice ids for the Avatar page picker (blank = engine default).
+
+    Built from the voice catalog; degrades to just the blank default if the
+    voice library is unavailable so the page always renders.
+    """
+    try:
+        from mimosa.avatar.voice_library import get_all_voices
+
+        return ("",) + tuple(v.voice_id for v in get_all_voices())
+    except Exception:  # pragma: no cover - defensive; voice lib optional
+        return ("",)
 
 
 def build_page_specs() -> Tuple[PageSpec, ...]:
@@ -282,9 +298,32 @@ def build_page_specs() -> Tuple[PageSpec, ...]:
                            "habits (e.g. opening a tool you use every morning)."),
         ),
     )
+    avatar = PageSpec(
+        PAGE_AVATAR, "Avatar", "face-smile-symbolic",
+        fields=(
+            FieldSpec("avatar", "enabled", "Show character avatar", "bool",
+                      help="Show the animated character avatar instead of the "
+                           "classic listening circle. Turn off to keep the "
+                           "circle."),
+            FieldSpec("avatar", "tier", "Render tier", "choice",
+                      choices=VALID_AVATAR_TIERS,
+                      help="How the avatar is drawn. Auto-detected for your "
+                           "hardware; '2d' is the animated sprite and "
+                           "'circle_only' falls back to the classic circle."),
+            FieldSpec("avatar", "voice_id", "Avatar voice", "choice",
+                      choices=_avatar_voice_choices(),
+                      help="TTS voice paired with the avatar (blank = the "
+                           "Voice page default)."),
+            # Animation speed lives in the shared UI section but is surfaced
+            # here too, since it most visibly affects the avatar.
+            FieldSpec("ui", "animation_speed", "Animation speed", "float",
+                      minimum=MIN_ANIM_SPEED, maximum=MAX_ANIM_SPEED, step=0.1,
+                      help="How quickly the avatar animates."),
+        ),
+    )
     about = PageSpec(PAGE_ABOUT, "About", "help-about-symbolic", fields=())
     return (voice, personalize, skills, system, privacy, tasks, research, ui,
-            learning, about)
+            avatar, learning, about)
 
 
 # ---------------------------------------------------------------------------
@@ -466,7 +505,7 @@ class SettingsController:
         current = self._manager.get().to_dict()
         working = self._working.to_dict()
         changed: List[Tuple[str, str]] = []
-        for section in ("voice", "skills", "system", "privacy", "ui"):
+        for section in ("voice", "skills", "system", "privacy", "ui", "avatar"):
             cur = current.get(section, {})
             wrk = working.get(section, {})
             keys = set(cur) | set(wrk)

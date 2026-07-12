@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 256 256" xmlns="https://i.ytimg.com/vi/ezISKfIdMrA/sddefault.jpg">
+  <!-- Masculine default avatar: cooler colors, angular features -->
+  <defs>
+    <radialGradient id="skin-masculine" cx="50%" cy="50%">
+      <stop offset="0%" style="stop-color:#F4D4B0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E8B08C;stop-opacity:1" />
+    </radialGradient>
+    <linearGradient id="hair-masculine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#3A3A3A;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1A1A1A;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="256" height="256" fill="#D4E6F1"/>
+  
+  <!-- Neck/Shoulders -->
+  <rect x="38" y="210" width="180" height="46" rx="10" fill="url(#skin-masculine)"/>
+  
+  <!-- Head (more square jaw) -->
+  <rect x="63" y="50" width="130" height="145" rx="15" fill="url(#skin-masculine)"/>
+  
+  <!-- Hair (short cut) -->
+  <path d="M 63,70 Q 63,40 85,35 Q 105,32 128,30 Q 151,32 171,35 Q 193,40 193,70 L 193,90 Q 190,85 185,82 L 185,75 L 180,75 L 180,78 L 175,75 L 175,80 L 170,77 L 170,82 L 163,78 L 163,95 L 150,95 L 150,90 L 145,90 L 145,85 L 140,85 L 140,80 L 135,80 L 135,75 L 130,75 L 130,70 L 128,70 L 128,75 L 126,75 L 121,75 L 121,80 L 116,80 L 116,85 L 111,85 L 111,90 L 106,90 L 106,95 L 93,95 L 93,78 L 86,82 L 86,77 L 81,80 L 81,75 L 76,78 L 76,75 L 71,82 Q 66,85 63,90 Z" fill="url(#hair-masculine)"/>
+  
+  <!-- Eyes -->
+  <rect x="92" y="100" width="16" height="15" rx="7" fill="#2C1810"/>
+  <rect x="148" y="100" width="16" height="15" rx="7" fill="#2C1810"/>
+  <circle cx="97" cy="105" r="3" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="153" cy="105" r="3" fill="#FFFFFF" opacity="0.8"/>
+  
+  <!-- Eyebrows (stronger, angular) -->
+  <rect x="88" y="88" width="22" height="3.5" rx="1" fill="#2C1810"/>
+  <rect x="146" y="88" width="22" height="3.5" rx="1" fill="#2C1810"/>
+  
+  <!-- Nose (more prominent) -->
+  <path d="M 128,110 L 128,135 M 122,133 L 128,135 L 134,133" stroke="#D49D73" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Mouth (neutral, firm) -->
+  <line x1="108" y1="155" x2="148" y2="155" stroke="#C0916D" stroke-width="3" stroke-linecap="round"/>
+  
+  <!-- Jawline definition -->
+  <path d="M 70,150 Q 70,175 85,185" stroke="#D49D73" stroke-width="1.5" fill="none" opacity="0.5"/>
+  <path d="M 186,150 Q 186,175 171,185" stroke="#D49D73" stroke-width="1.5" fill="none" opacity="0.5"/>
+</svg>

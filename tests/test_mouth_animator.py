@@ -1,212 +1,238 @@
-"""Tests for :mod:`mimosa.ui.mouth_animator`.
-
-The animation math is pure and tested directly. Drawing is exercised against a
-real Cairo image surface when pycairo is available, and skipped otherwise so
-the suite still runs on headless machines without Cairo.
+"""
+Tests for avatar mouth animation and lip sync (M8.3).
 """
 
 import pytest
-
-from mimosa.ui.mouth_animator import (
-    REST_SHAPE,
-    VISEME_SHAPES,
-    MouthAnimator,
+import time
+from mimosa.avatar.mouth_shapes import (
     MouthShape,
-    interpolate_shape,
-    shape_for,
+    phoneme_to_mouth_shape,
+    text_to_simple_visemes,
+    get_mouth_params,
+    MOUTH_SHAPE_PARAMS
 )
-from mimosa.ui.viseme_mapper import Viseme
+from mimosa.avatar.lip_sync import (
+    LipSyncEngine,
+    PhonemeEvent,
+    create_phoneme_events_from_timing
+)
 
 
-class TestMouthShape:
-    def test_clamp_bounds(self):
-        s = MouthShape(opening=5, width=5, roundness=-1, corner_lift=9, teeth=-2)
-        s.clamp()
-        assert s.opening == 1.0
-        assert s.width == 1.0
-        assert s.roundness == 0.0
-        assert s.corner_lift == 0.5
-        assert s.teeth == 0.0
+class TestMouthShapes:
+    """Test mouth shape definitions and phoneme mapping."""
+    
+    def test_all_mouth_shapes_have_params(self):
+        """Verify all mouth shapes have rendering parameters."""
+        for shape in MouthShape:
+            params = get_mouth_params(shape)
+            assert 'height' in params
+            assert 'width' in params
+            assert 'roundness' in params
+            assert 0.0 <= params['height'] <= 1.0
+            assert 0.0 <= params['width'] <= 1.0
+            assert 0.0 <= params['roundness'] <= 1.0
+    
+    def test_phoneme_to_mouth_shape_bilabials(self):
+        """Verify bilabial phonemes map to CLOSED."""
+        assert phoneme_to_mouth_shape('M') == MouthShape.CLOSED
+        assert phoneme_to_mouth_shape('B') == MouthShape.CLOSED
+        assert phoneme_to_mouth_shape('P') == MouthShape.CLOSED
+    
+    def test_phoneme_to_mouth_shape_open_vowels(self):
+        """Verify open vowels map correctly."""
+        assert phoneme_to_mouth_shape('AA') == MouthShape.OPEN
+        assert phoneme_to_mouth_shape('AE') == MouthShape.OPEN
+    
+    def test_phoneme_to_mouth_shape_wide_vowels(self):
+        """Verify wide vowels map correctly."""
+        assert phoneme_to_mouth_shape('IY') == MouthShape.WIDE
+        assert phoneme_to_mouth_shape('EY') == MouthShape.WIDE
+    
+    def test_phoneme_to_mouth_shape_rounded_vowels(self):
+        """Verify rounded vowels map correctly."""
+        assert phoneme_to_mouth_shape('UW') == MouthShape.ROUNDED
+        assert phoneme_to_mouth_shape('OW') == MouthShape.ROUNDED
+    
+    def test_phoneme_to_mouth_shape_strips_stress(self):
+        """Verify stress markers are stripped from phonemes."""
+        assert phoneme_to_mouth_shape('AA0') == MouthShape.OPEN
+        assert phoneme_to_mouth_shape('IY1') == MouthShape.WIDE
+        assert phoneme_to_mouth_shape('UW2') == MouthShape.ROUNDED
+    
+    def test_phoneme_to_mouth_shape_unknown_returns_relaxed(self):
+        """Verify unknown phonemes default to RELAXED."""
+        assert phoneme_to_mouth_shape('UNKNOWN') == MouthShape.RELAXED
+        assert phoneme_to_mouth_shape('XYZ') == MouthShape.RELAXED
+    
+    def test_text_to_simple_visemes_empty(self):
+        """Verify empty text returns RELAXED."""
+        shapes = text_to_simple_visemes("")
+        assert len(shapes) == 1
+        assert shapes[0] == MouthShape.RELAXED
+    
+    def test_text_to_simple_visemes_basic(self):
+        """Verify basic text creates mouth shapes."""
+        shapes = text_to_simple_visemes("hello")
+        assert len(shapes) == 5
+        assert MouthShape.OPEN in shapes  # 'e' and 'o'
+        assert MouthShape.TONGUE in shapes  # 'l'
+    
+    def test_text_to_simple_visemes_bilabials(self):
+        """Verify bilabial sounds create CLOSED shapes."""
+        shapes = text_to_simple_visemes("bpm")
+        assert all(s == MouthShape.CLOSED for s in shapes)
 
-    def test_clamp_lower_bounds(self):
-        s = MouthShape(opening=-1, width=0.0, corner_lift=-9)
-        s.clamp()
-        assert s.opening == 0.0
-        assert s.width == 0.2  # width floored at 0.2
-        assert s.corner_lift == -0.5
 
-
-class TestInterpolateShape:
-    def test_endpoints(self):
-        a = MouthShape(opening=0.0)
-        b = MouthShape(opening=1.0)
-        assert interpolate_shape(a, b, 0.0).opening == pytest.approx(0.0)
-        assert interpolate_shape(a, b, 1.0).opening == pytest.approx(1.0)
-
-    def test_midpoint(self):
-        a = MouthShape(opening=0.0, width=0.4)
-        b = MouthShape(opening=1.0, width=0.8)
-        mid = interpolate_shape(a, b, 0.5)
-        assert mid.opening == pytest.approx(0.5)
-        assert mid.width == pytest.approx(0.6)
-
-    def test_t_clamped(self):
-        a = MouthShape(opening=0.0)
-        b = MouthShape(opening=1.0)
-        assert interpolate_shape(a, b, 5.0).opening == pytest.approx(1.0)
-        assert interpolate_shape(a, b, -5.0).opening == pytest.approx(0.0)
-
-
-class TestShapeFor:
-    def test_known_viseme(self):
-        assert shape_for(Viseme.OPEN) is VISEME_SHAPES[Viseme.OPEN]
-
-    def test_open_is_wide_open(self):
-        assert shape_for(Viseme.OPEN).opening > 0.8
-
-    def test_closed_is_shut(self):
-        assert shape_for(Viseme.CLOSED).opening < 0.05
-
-    def test_rounded_is_round(self):
-        assert shape_for(Viseme.ROUNDED).roundness > 0.8
-
-    def test_all_visemes_have_shapes(self):
-        for v in Viseme:
-            assert isinstance(shape_for(v), MouthShape)
-
-
-class TestAnimatorUpdate:
-    def _step(self, animator, seconds, dt=1 / 60):
-        steps = int(seconds / dt)
-        for _ in range(steps):
-            animator.update(dt)
-
-    def test_eases_toward_open(self):
-        a = MouthAnimator(interpolation_speed=14.0)
-        a.set_target_viseme(Viseme.OPEN)
-        assert a.current_shape.opening < 0.1  # starts at rest
-        self._step(a, 1.0)
-        assert a.current_shape.opening > 0.8
-
-    def test_eases_toward_closed(self):
-        a = MouthAnimator(interpolation_speed=14.0)
-        a.set_target_viseme(Viseme.OPEN)
-        self._step(a, 1.0)
-        a.set_target_viseme(Viseme.CLOSED)
-        self._step(a, 1.0)
-        assert a.current_shape.opening < 0.1
-
-    def test_update_zero_dt_noop(self):
-        a = MouthAnimator()
-        a.set_target_viseme(Viseme.OPEN)
-        before = a.current_shape.opening
-        a.update(0.0)
-        assert a.current_shape.opening == before
-
-    def test_update_clamps_large_dt(self):
-        # A huge dt should not overshoot past the target.
-        a = MouthAnimator()
-        a.set_target_viseme(Viseme.OPEN)
-        a.update(100.0)
-        assert a.current_shape.opening <= 1.0
-
-    def test_update_bad_dt_noop(self):
-        a = MouthAnimator()
-        a.set_target_viseme(Viseme.OPEN)
-        before = a.current_shape.opening
-        a.update("bad")
-        assert a.current_shape.opening == before
-
-    def test_set_window_blends_target(self):
-        a = MouthAnimator()
-        a.set_window(Viseme.CLOSED, Viseme.OPEN, 0.5)
-        # Target opening is between closed (0) and open (~0.95).
-        assert 0.3 < a.target_shape.opening < 0.7
-
+class TestLipSyncEngine:
+    """Test lip sync engine and phoneme event handling."""
+    
+    def test_engine_initializes(self):
+        """Verify engine can be created."""
+        engine = LipSyncEngine()
+        assert engine is not None
+        assert not engine.is_playing
+        assert len(engine.events) == 0
+    
+    def test_load_phonemes(self):
+        """Verify phoneme events can be loaded."""
+        engine = LipSyncEngine()
+        events = [
+            PhonemeEvent("M", 0.0, 0.1, MouthShape.CLOSED),
+            PhonemeEvent("AA", 0.1, 0.2, MouthShape.OPEN),
+            PhonemeEvent("P", 0.3, 0.1, MouthShape.CLOSED),
+        ]
+        engine.load_phonemes(events)
+        assert len(engine.events) == 3
+        assert engine.events[0].phoneme == "M"
+    
+    def test_load_phonemes_sorts_by_time(self):
+        """Verify events are sorted by start time."""
+        engine = LipSyncEngine()
+        events = [
+            PhonemeEvent("AA", 0.2, 0.1),
+            PhonemeEvent("M", 0.0, 0.1),
+            PhonemeEvent("P", 0.1, 0.1),
+        ]
+        engine.load_phonemes(events)
+        assert engine.events[0].start_time == 0.0
+        assert engine.events[1].start_time == 0.1
+        assert engine.events[2].start_time == 0.2
+    
+    def test_load_from_text(self):
+        """Verify simple text-based phoneme generation."""
+        engine = LipSyncEngine()
+        engine.load_from_text("hello", 1.0)
+        assert len(engine.events) > 0
+        assert all(isinstance(e, PhonemeEvent) for e in engine.events)
+    
+    def test_start_stop(self):
+        """Verify start/stop functionality."""
+        engine = LipSyncEngine()
+        engine.load_from_text("test", 1.0)
+        
+        assert not engine.is_playing
+        engine.start()
+        assert engine.is_playing
+        assert engine.start_time is not None
+        
+        engine.stop()
+        assert not engine.is_playing
+    
+    def test_get_current_mouth_shape_not_playing(self):
+        """Verify RELAXED returned when not playing."""
+        engine = LipSyncEngine()
+        engine.load_from_text("test", 1.0)
+        shape = engine.get_current_mouth_shape()
+        assert shape == MouthShape.RELAXED
+    
+    def test_get_current_mouth_shape_playing(self):
+        """Verify mouth shape returned during playback."""
+        engine = LipSyncEngine()
+        events = [
+            PhonemeEvent("M", 0.0, 0.5, MouthShape.CLOSED),
+            PhonemeEvent("AA", 0.5, 0.5, MouthShape.OPEN),
+        ]
+        engine.load_phonemes(events)
+        engine.start()
+        
+        # Should return first phoneme immediately
+        shape = engine.get_current_mouth_shape()
+        assert shape == MouthShape.CLOSED
+    
+    def test_get_progress(self):
+        """Verify progress calculation."""
+        engine = LipSyncEngine()
+        events = [
+            PhonemeEvent("M", 0.0, 1.0),
+        ]
+        engine.load_phonemes(events)
+        
+        # Not playing
+        assert engine.get_progress() == 0.0
+        
+        # Playing
+        engine.start()
+        progress = engine.get_progress()
+        assert 0.0 <= progress <= 1.0
+    
+    def test_is_finished(self):
+        """Verify finished detection."""
+        engine = LipSyncEngine()
+        events = [
+            PhonemeEvent("M", 0.0, 0.01),  # Very short
+        ]
+        engine.load_phonemes(events)
+        engine.start()
+        
+        # Wait for completion
+        time.sleep(0.02)
+        assert engine.is_finished()
+    
     def test_reset(self):
-        a = MouthAnimator()
-        a.set_target_viseme(Viseme.OPEN)
-        for _ in range(60):
-            a.update(1 / 60)
-        a.reset()
-        assert a.current_shape.opening == pytest.approx(REST_SHAPE.opening)
-        assert a.target_shape.opening == pytest.approx(REST_SHAPE.opening)
+        """Verify reset functionality."""
+        engine = LipSyncEngine()
+        events = [PhonemeEvent("M", 0.0, 1.0)]
+        engine.load_phonemes(events)
+        engine.start()
+        
+        time.sleep(0.1)
+        engine.reset()
+        
+        # Should restart from beginning
+        assert engine._current_index == 0
 
 
-class TestAnimatorConfig:
-    def test_speed_clamped(self):
-        assert MouthAnimator(interpolation_speed=999).interpolation_speed == 40.0
-        assert MouthAnimator(interpolation_speed=0).interpolation_speed == 1.0
-
-    def test_bad_speed_defaults(self):
-        assert MouthAnimator(interpolation_speed="x").interpolation_speed == 14.0
-
-    def test_set_interpolation_speed(self):
-        a = MouthAnimator()
-        a.set_interpolation_speed(5)
-        assert a.interpolation_speed == 5.0
-
-    def test_invalid_style_falls_back(self):
-        assert MouthAnimator(style="bogus").style == "natural"
-
-    def test_set_style(self):
-        a = MouthAnimator()
-        a.set_style("cartoon")
-        assert a.style == "cartoon"
-        a.set_style("nope")  # ignored
-        assert a.style == "cartoon"
-
-    def test_styled_cartoon_opens_wider(self):
-        a = MouthAnimator(style="cartoon")
-        base = MouthShape(opening=0.5)
-        assert a._styled(base).opening > 0.5
-
-    def test_styled_minimal_opens_less(self):
-        a = MouthAnimator(style="minimal")
-        base = MouthShape(opening=0.5)
-        assert a._styled(base).opening < 0.5
-
-    def test_styled_natural_unchanged(self):
-        a = MouthAnimator(style="natural")
-        base = MouthShape(opening=0.5)
-        assert a._styled(base).opening == 0.5
-
-
-# -- drawing (requires Cairo) ------------------------------------------------
-
-cairo = pytest.importorskip("cairo")
-
-
-class TestDraw:
-    def _surface(self):
-        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 120, 120)
-        return surface, cairo.Context(surface)
-
-    def test_draw_closed_mouth(self):
-        surface, cr = self._surface()
-        a = MouthAnimator()
-        a.set_target_viseme(Viseme.CLOSED)
-        a.draw(cr, 60, 60, 40, (0.1, 0.1, 0.1), cairo=cairo)
-        surface.flush()
-        # Some pixels should have been painted (mouth line).
-        assert any(b != 0 for b in bytes(surface.get_data()))
-
-    def test_draw_open_mouth(self):
-        surface, cr = self._surface()
-        a = MouthAnimator()
-        a.set_target_viseme(Viseme.OPEN)
-        for _ in range(60):
-            a.update(1 / 60)
-        a.draw(cr, 60, 60, 40, (0.9, 0.2, 0.2), cairo=cairo)
-        surface.flush()
-        assert any(b != 0 for b in bytes(surface.get_data()))
-
-    def test_draw_no_cairo_is_noop(self):
-        # Passing cairo=None and with no global cairo available must not raise.
-        surface, cr = self._surface()
-        a = MouthAnimator()
-        # Force the lazy path to find nothing by passing a sentinel that fails.
-        try:
-            a.draw(cr, 60, 60, 40, (0.1, 0.1, 0.1), cairo=cairo)
-        except Exception as exc:  # pragma: no cover
-            pytest.fail(f"draw raised unexpectedly: {exc}")
+class TestPhonemeEventCreation:
+    """Test phoneme event creation utilities."""
+    
+    def test_create_from_timing(self):
+        """Verify events created from phoneme and timing lists."""
+        phonemes = ['M', 'AA', 'P']
+        timings = [(0.0, 0.1), (0.1, 0.2), (0.3, 0.1)]
+        
+        events = create_phoneme_events_from_timing(phonemes, timings)
+        
+        assert len(events) == 3
+        assert events[0].phoneme == 'M'
+        assert events[0].start_time == 0.0
+        assert events[0].duration == 0.1
+        assert events[0].mouth_shape == MouthShape.CLOSED
+    
+    def test_create_from_timing_auto_maps_shapes(self):
+        """Verify mouth shapes are automatically mapped."""
+        phonemes = ['IY', 'UW', 'AA']
+        timings = [(0.0, 0.1), (0.1, 0.1), (0.2, 0.1)]
+        
+        events = create_phoneme_events_from_timing(phonemes, timings)
+        
+        assert events[0].mouth_shape == MouthShape.WIDE
+        assert events[1].mouth_shape == MouthShape.ROUNDED
+        assert events[2].mouth_shape == MouthShape.OPEN
+    
+    def test_create_from_timing_mismatched_raises(self):
+        """Verify error when phonemes and timings don't match."""
+        phonemes = ['M', 'AA']
+        timings = [(0.0, 0.1)]
+        
+        with pytest.raises(ValueError):
+            create_phoneme_events_from_timing(phonemes, timings)

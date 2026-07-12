@@ -546,3 +546,101 @@ def test_appconfig_old_payload_without_hardware_gets_defaults():
     cfg = AppConfig.from_dict({"version": 1, "voice": {}})
     assert cfg.hardware.capability_level == "unknown"
     assert cfg.hardware.detected is False
+
+
+
+# ---------------------------------------------------------------------------
+# Item #2: default avatar behaviour (new install vs v1.x upgrade)
+# ---------------------------------------------------------------------------
+
+from mimosa.utils.config import apply_new_install_avatar_defaults
+
+
+def test_new_install_enables_avatar_with_detected_tier(monkeypatch, tmp_path):
+    """A brand-new install (no config file) enables the avatar by default."""
+    monkeypatch.setenv("MIMOSA_CONFIG", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MIMOSA_UI_CONFIG", str(tmp_path / "ui.json"))
+    # Force a deterministic tier so the test is hardware-independent.
+    monkeypatch.setattr(
+        "mimosa.system.capability_detector.detect_avatar_tier",
+        lambda *a, **k: "2d",
+    )
+    m = AppConfigManager()
+    cfg = m.load()
+    assert cfg.avatar.enabled is True
+    assert cfg.avatar.tier == "2d"
+    assert cfg.avatar.use_circle() is False
+
+
+def test_new_install_low_end_uses_circle_but_enabled(monkeypatch, tmp_path):
+    """On a very constrained host the tier is circle_only but still enabled."""
+    monkeypatch.setenv("MIMOSA_CONFIG", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MIMOSA_UI_CONFIG", str(tmp_path / "ui.json"))
+    monkeypatch.setattr(
+        "mimosa.system.capability_detector.detect_avatar_tier",
+        lambda *a, **k: "circle_only",
+    )
+    m = AppConfigManager()
+    cfg = m.load()
+    assert cfg.avatar.enabled is True
+    assert cfg.avatar.tier == "circle_only"
+    # circle still rendered because the tier resolves to circle_only
+    assert cfg.avatar.use_circle() is True
+
+
+def test_v1x_upgrade_keeps_avatar_disabled(monkeypatch, tmp_path):
+    """An existing config WITHOUT an avatar section is a v1.x upgrade -> disabled."""
+    target = tmp_path / "settings.json"
+    # Simulate a v1.x config: sectioned layout, but no "avatar" key.
+    target.write_text(json.dumps({
+        "version": 1,
+        "first_run_complete": True,
+        "voice": {"tts_speed": 1.2},
+    }))
+    monkeypatch.setenv("MIMOSA_CONFIG", str(target))
+    monkeypatch.setenv("MIMOSA_UI_CONFIG", str(tmp_path / "ui.json"))
+    # Even if detection would say "2d", the upgrade path must not enable it.
+    monkeypatch.setattr(
+        "mimosa.system.capability_detector.detect_avatar_tier",
+        lambda *a, **k: "2d",
+    )
+    m = AppConfigManager()
+    cfg = m.load()
+    assert cfg.avatar.enabled is False
+    assert cfg.avatar.use_circle() is True
+
+
+def test_existing_config_with_avatar_section_is_preserved(monkeypatch, tmp_path):
+    """A config that already has an avatar section is respected verbatim."""
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps({
+        "version": 1,
+        "avatar": {"enabled": True, "tier": "2d", "voice_id": "en_US-amy"},
+    }))
+    monkeypatch.setenv("MIMOSA_CONFIG", str(target))
+    monkeypatch.setenv("MIMOSA_UI_CONFIG", str(tmp_path / "ui.json"))
+    m = AppConfigManager()
+    cfg = m.load()
+    assert cfg.avatar.enabled is True
+    assert cfg.avatar.tier == "2d"
+    assert cfg.avatar.voice_id == "en_US-amy"
+
+
+def test_apply_new_install_avatar_defaults_injectable_detector():
+    """The helper accepts an injected detector and never raises."""
+    cfg = AppConfig()
+    assert cfg.avatar.enabled is False  # dataclass default
+    apply_new_install_avatar_defaults(cfg, detector=lambda: "2d")
+    assert cfg.avatar.enabled is True
+    assert cfg.avatar.tier == "2d"
+
+
+def test_apply_new_install_avatar_defaults_detector_failure_is_safe():
+    """If the detector raises, we fall back to the circle tier, still enabled."""
+    def boom():
+        raise RuntimeError("no hardware probe")
+
+    cfg = AppConfig()
+    apply_new_install_avatar_defaults(cfg, detector=boom)
+    assert cfg.avatar.enabled is True
+    assert cfg.avatar.tier == "circle_only"

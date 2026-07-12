@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from mimosa.utils.config import (
@@ -45,6 +46,7 @@ STEP_SPEAKER = "speaker"
 STEP_LLM = "llm"
 STEP_PERSONALIZE = "personalize"
 STEP_VOICE = "voice"
+STEP_AVATAR = "avatar"
 STEP_WAKEWORD = "wakeword"
 STEP_PRIVACY = "privacy"
 STEP_SYSTEM = "system"
@@ -293,8 +295,9 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
     )
     voice = WizardStep(
         STEP_VOICE,
-        "Voice",
-        "Choose how MimOSA listens. You can change all of this later in Settings.",
+        "Your Voice",
+        "Choose how MimOSA sounds and listens. Pick a voice, set your wake "
+        "word and sensitivity. You can change all of this later in Settings.",
         fields=(
             FieldSpec("voice", "wake_word", "Wake word", "text",
                       help="The phrase that wakes MimOSA up (e.g. 'hey mimosa'). "
@@ -321,9 +324,33 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
             "next step!"
         ),
     )
+    avatar = WizardStep(
+        STEP_AVATAR,
+        "Your Avatar",
+        "Personalize how MimOSA appears on your desktop. Describe your ideal "
+        "assistant's appearance, or use one of our default avatars. You can "
+        "always change this later in Settings.",
+        # Rendered with custom UI (description entry, preview, generate button)
+        fields=(),
+        sidebar=(
+            "🎨 Your assistant's face\n\n"
+            "Give me a look! Describe the kind of character you'd like to see — "
+            "professional, friendly, futuristic — and I'll generate a custom "
+            "avatar just for you.\n\n"
+            "Examples:\n"
+            "• \"Young professional with short hair and glasses\"\n"
+            "• \"Friendly character with warm colors\"\n"
+            "• \"Minimalist design, clean and simple\"\n\n"
+            "Your gender preference helps me match your avatar's appearance to "
+            "the voice you've chosen.\n\n"
+            "If generation isn't available on your hardware, I'll use a stylish "
+            "default avatar instead. You can also stick with the classic circle "
+            "visualization — it's always an option!"
+        ),
+    )
     wakeword = WizardStep(
         STEP_WAKEWORD,
-        "Your Own Wake Word",
+        "Wake Word",
         "Want me to answer to a name of your choosing — like \"Jarvis\" or "
         "\"Computer\"? I can train a personal wake-word model right on your "
         "machine. It's completely optional: \"Hey MimOSA\" always works.",
@@ -415,8 +442,8 @@ def build_wizard_steps() -> Tuple[WizardStep, ...]:
             "Talk soon!"
         ),
     )
-    return (welcome, microphone, speaker, llm, personalize, voice, wakeword,
-            privacy, system, finish)
+    return (welcome, microphone, speaker, llm, personalize, voice, avatar,
+            wakeword, privacy, system, finish)
 
 
 class SetupWizardController:
@@ -932,6 +959,231 @@ class SetupWizardController:
         except Exception:
             logger.warning("Could not create desktop shortcut", exc_info=True)
             return False
+
+    # -----------------------------------------------------------------
+    # Avatar generation methods (M8.2)
+    # -----------------------------------------------------------------
+
+    def get_avatar_description(self) -> str:
+        """Get the user's avatar description text."""
+        return getattr(self._working.avatar, 'description', '')
+
+    def set_avatar_description(self, description: str):
+        """Set the avatar description text."""
+        # Avatar description stored temporarily; not in final config yet
+        # Will be used during generation
+        if not hasattr(self._working.avatar, '_temp_description'):
+            object.__setattr__(self._working.avatar, '_temp_description', '')
+        object.__setattr__(self._working.avatar, '_temp_description', description.strip())
+
+    def get_avatar_enabled(self) -> bool:
+        """Check if avatar is enabled (vs. circle)."""
+        return self._working.avatar.enabled
+
+    def set_avatar_enabled(self, enabled: bool):
+        """Enable or disable avatar (use circle if disabled)."""
+        self._working.avatar.enabled = enabled
+
+    # -- avatar presets (M8/v2.0.0-beta wizard "Your Avatar" step) --------
+    #
+    # The wizard offers a small set of one-click starter avatars so a new user
+    # gets a face without needing the (optional) AI generator. Each preset maps
+    # to a bundled default sprite gender and a sensibly paired TTS voice, and
+    # flips ``avatar.enabled`` on. The "circle" preset keeps the classic
+    # listening circle (avatar disabled) for users who prefer it or whose
+    # hardware can't drive a sprite.
+
+    #: (preset_id, label, description, gender) for the wizard avatar picker.
+    AVATAR_PRESETS: Tuple[Tuple[str, str, str, str], ...] = (
+        ("feminine", "Feminine",
+         "A friendly feminine character, paired with a feminine voice.",
+         "female"),
+        ("masculine", "Masculine",
+         "A friendly masculine character, paired with a masculine voice.",
+         "male"),
+        ("neutral", "Neutral",
+         "A gender-neutral character with a neutral voice.",
+         "neutral"),
+        ("circle", "Classic circle",
+         "Keep the classic listening circle \u2014 no character avatar.",
+         "neutral"),
+    )
+
+    def avatar_preset_options(self) -> Tuple[Tuple[str, str, str], ...]:
+        """Return ``(preset_id, label, description)`` rows for the avatar step."""
+        return tuple((pid, label, desc) for pid, label, desc, _g in self.AVATAR_PRESETS)
+
+    def _paired_voice_for_gender(self, gender: str) -> Optional[str]:
+        """Best default voice_id for a gender preset (``None`` if unavailable)."""
+        try:
+            from mimosa.avatar.voice_library import get_voices_for_gender
+
+            voices = get_voices_for_gender(gender)
+            if voices:
+                return voices[0].voice_id
+        except Exception:  # pragma: no cover - defensive; voice lib optional
+            logger.debug("Voice pairing lookup failed for %s", gender, exc_info=True)
+        return None
+
+    def get_selected_avatar_preset(self) -> str:
+        """Return the currently-selected preset id.
+
+        Derives the selection from the working config: if the avatar is
+        disabled we report ``"circle"``; otherwise we match the paired voice /
+        personalization gender back to a preset, defaulting to ``"neutral"``.
+        """
+        if not self._working.avatar.enabled:
+            return "circle"
+        gender = (self._working.personality.gender or "neutral").lower()
+        for pid, _label, _desc, g in self.AVATAR_PRESETS:
+            if pid != "circle" and g == gender:
+                return pid
+        return "neutral"
+
+    def select_avatar_preset(self, preset_id: str) -> str:
+        """Apply an avatar preset to the working config.
+
+        Returns the applied preset id (falling back to ``"neutral"`` for an
+        unknown id). The "circle" preset disables the avatar; every other
+        preset enables it, records the detected render tier, and pairs a
+        matching default voice.
+        """
+        valid = {pid for pid, _l, _d, _g in self.AVATAR_PRESETS}
+        if preset_id not in valid:
+            preset_id = "neutral"
+
+        if preset_id == "circle":
+            self._working.avatar.enabled = False
+            self._working.avatar.tier = "circle_only"
+            logger.info("Wizard: avatar preset 'circle' (classic listening circle)")
+            return preset_id
+
+        gender = next(g for pid, _l, _d, g in self.AVATAR_PRESETS if pid == preset_id)
+        self._working.avatar.enabled = True
+        # Pick the best render tier the host can drive; degrades to circle_only
+        # transparently on constrained hardware.
+        try:
+            from mimosa.system.capability_detector import detect_avatar_tier
+
+            self._working.avatar.tier = detect_avatar_tier()
+        except Exception:  # pragma: no cover - defensive
+            self._working.avatar.tier = "2d"
+        # Keep persona gender + paired voice in sync with the chosen look.
+        self._working.personality.gender = gender
+        voice_id = self._paired_voice_for_gender(gender)
+        if voice_id:
+            self._working.avatar.voice_id = voice_id
+        logger.info(
+            "Wizard: avatar preset '%s' (gender=%s, tier=%s, voice=%s)",
+            preset_id, gender, self._working.avatar.tier, voice_id,
+        )
+        return preset_id
+
+    # -- voice picker (v2.0.0-beta wizard "Your Voice" step, item #7) ------
+
+    def voice_options(self) -> Tuple[Tuple[str, str, str], ...]:
+        """Return ``(voice_id, label, description)`` for every catalog voice.
+
+        Backs the wizard's voice dropdown so users pick a named voice instead
+        of guessing an opaque model id. Degrades to an empty tuple if the voice
+        library is unavailable.
+        """
+        try:
+            from mimosa.avatar.voice_library import (
+                format_voice_description,
+                get_all_voices,
+            )
+
+            return tuple(
+                (v.voice_id, v.name, format_voice_description(v))
+                for v in get_all_voices()
+            )
+        except Exception:  # pragma: no cover - defensive; voice lib optional
+            logger.debug("Voice catalog unavailable", exc_info=True)
+            return ()
+
+    def get_selected_voice(self) -> Optional[str]:
+        """Return the currently-selected voice id (avatar voice or default)."""
+        return self._working.avatar.voice_id
+
+    def set_selected_voice(self, voice_id: Optional[str]) -> Optional[str]:
+        """Record the chosen TTS voice on the working config."""
+        voice_id = (voice_id or "").strip() or None
+        self._working.avatar.voice_id = voice_id
+        return voice_id
+
+    def get_avatar_custom_sprite_path(self) -> Optional[str]:
+        """Get the path to the custom avatar sprite."""
+        return self._working.avatar.custom_sprite_path
+
+    def set_avatar_custom_sprite_path(self, path: Optional[str]):
+        """Set the path to the custom avatar sprite."""
+        self._working.avatar.custom_sprite_path = path
+
+    def generate_avatar(
+        self,
+        description: str,
+        gender: Optional[str] = None
+    ) -> Optional[Path]:
+        """
+        Generate an avatar from description.
+        
+        Args:
+            description: Text description of desired avatar
+            gender: Optional gender preference (uses personalization if not provided)
+        
+        Returns:
+            Path to generated avatar, or None if generation failed
+        """
+        try:
+            from mimosa.avatar.generator import AvatarGenerator
+            from mimosa.avatar.cache_manager import AvatarCacheManager
+            
+            # Use personalization gender if not explicitly provided
+            if gender is None:
+                gender = self._working.personalization.gender or 'neutral'
+            
+            # Generate avatar
+            generator = AvatarGenerator()
+            cache_manager = AvatarCacheManager()
+            
+            # Generate to temp location
+            import tempfile
+            temp_dir = Path(tempfile.mkdtemp())
+            temp_sprite = temp_dir / "avatar.png"
+            
+            result = generator.generate_avatar(
+                description=description,
+                gender=gender,
+                output_path=temp_sprite,
+                method='auto'  # Try AI, fall back to default
+            )
+            
+            if result and result.exists():
+                # Cache the avatar
+                avatar_id = cache_manager.save_avatar(
+                    sprite_path=result,
+                    description=description,
+                    gender=gender,
+                    source='setup_wizard'
+                )
+                
+                # Get cached path
+                cached_path = cache_manager.load_avatar(avatar_id)
+                
+                # Clean up temp
+                if temp_sprite.exists() and temp_sprite != cached_path:
+                    temp_sprite.unlink()
+                if temp_dir.exists():
+                    temp_dir.rmdir()
+                
+                return cached_path
+            
+            return None
+            
+        except Exception as e:
+            logger.warning("Avatar generation failed: %s", e, exc_info=True)
+            return None
 
     def cancel(self, *, mark_complete: bool = True, persist: bool = True) -> None:
         """Abort the wizard, discarding working edits.

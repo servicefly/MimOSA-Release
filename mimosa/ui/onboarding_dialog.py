@@ -232,9 +232,12 @@ def open_onboarding_dialog(
     ``on_close(False)`` so callers can proceed without blocking).
     """
 
-    if not HAS_GTK or OnboardingDialog is None:
+    from mimosa.ui.environment import has_display
+
+    if not HAS_GTK or OnboardingDialog is None or not has_display():
         logger.info(
-            "Onboarding dialog requested but GTK is unavailable; skipping."
+            "Onboarding dialog requested but no GUI is available "
+            "(GTK/display missing); skipping."
         )
         if on_close is not None:
             try:

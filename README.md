@@ -16,6 +16,32 @@ time, and lets its language model run either in the cloud or **fully locally**
 
 ---
 
+## 🆕 What's New in v2.0
+
+**v2.0 introduces the Avatar System** — MimOSA can now show an animated
+character avatar with a matching voice, instead of (or alongside) the classic
+listening circle.
+
+- **🧑‍🎨 Character avatar** — a friendly animated 2D character that reacts to the
+  assistant's state and lip-syncs to its speech. New installs get an avatar
+  enabled by default (auto-matched to your hardware); the classic circle is
+  always one click away.
+- **🧙 Guided setup** — the first-run wizard now has clear **"Your Voice"**,
+  **"Your Avatar"** and **"Wake Word"** steps, with one-click starter avatars
+  (Feminine / Masculine / Neutral / classic circle).
+- **🔊 Voice picker with "Play Sample"** — audition any of the built-in Piper
+  voices from the wizard and the new Settings **Avatar** tab before you commit.
+- **⚙️ Settings → Avatar tab** — toggle the avatar, choose the render tier,
+  pick a paired voice and tune animation speed in one place.
+- **🪶 Graceful by default** — the avatar auto-downgrades to the classic circle
+  on constrained hardware, and everything still works with no GPU, no audio, or
+  headless.
+
+Upgrading from v1.x? Your setup is preserved — the avatar stays **off** until
+you choose one. See [`docs/UPGRADING.md`](docs/UPGRADING.md).
+
+---
+
 ## ✨ Key features
 
 - **🎙️ Natural voice control** — wake word, on-device speech-to-text (Whisper)
@@ -28,8 +54,11 @@ time, and lets its language model run either in the cloud or **fully locally**
   brightness, Wi-Fi and battery.
 - **🖥️ Kubuntu/KDE integration** — OS & hardware awareness with KDE Plasma
   D-Bus integration.
-- **🙂 Desktop avatar (optional)** — a circular, always-on-top GTK4 avatar that
-  animates with the assistant's state and lip-syncs to its speech.
+- **🙂 Desktop avatar (v2.0)** — an animated, always-on-top GTK4 character
+  avatar with a paired voice that reacts to the assistant's state and lip-syncs
+  to its speech. Pick a starter avatar and voice in the setup wizard or the
+  Settings → Avatar tab; it gracefully falls back to the classic listening
+  circle on constrained hardware or when you prefer it.
 - **🧩 Custom skills (no code)** — teach MimOSA new commands with declarative
   triggers and text/LLM responses.
 - **💬 Companion UI** — optional system-tray icon and a text-chat window that

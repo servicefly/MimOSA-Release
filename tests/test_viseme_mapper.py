@@ -1,133 +1,122 @@
-"""Tests for mimosa.ui.viseme_mapper -- phoneme -> viseme mapping (M3.2).
-
-Pure data/logic; no GTK, audio, or display required.
+"""
+Tests for viseme mapping utilities (M8.3).
 """
 
 import pytest
-
-from mimosa.ui.viseme_mapper import (
-    DEFAULT_PHONEME_TO_VISEME,
-    Viseme,
-    VisemeMapper,
-    _strip_decorations,
-    phoneme_to_viseme,
+from mimosa.avatar.viseme_mapper import (
+    estimate_speech_duration,
+    create_simple_viseme_events,
+    estimate_syllable_count
 )
+from mimosa.avatar.lip_sync import PhonemeEvent
 
 
-class TestVisemeEnum:
-    def test_values_are_stable_strings(self):
-        assert Viseme.OPEN.value == "open"
-        assert Viseme.CLOSED.value == "closed"
-        assert Viseme.SILENCE.value == "silence"
-
-    def test_openness_monotonic_extremes(self):
-        assert Viseme.SILENCE.openness == 0.0
-        assert Viseme.OPEN.openness > Viseme.CLOSED.openness
-        assert Viseme.OPEN.openness == pytest.approx(0.95)
-
-    def test_ten_plus_one_visemes(self):
-        # 10 mouth shapes + silence.
-        assert len(list(Viseme)) == 11
-
-
-class TestStripDecorations:
-    def test_strips_stress_and_length(self):
-        assert _strip_decorations("ˈɑː") == "ɑ"
-        assert _strip_decorations("ˌeɪ") == "eɪ"
-
-    def test_strips_combining_marks(self):
-        # nasalized vowel -> base vowel
-        assert _strip_decorations("ã") == "a"
-
-    def test_empty(self):
-        assert _strip_decorations("") == ""
-        assert _strip_decorations("ˈ") == ""
-
-
-class TestPhonemeToViseme:
-    @pytest.mark.parametrize("ph,expected", [
-        ("p", Viseme.CLOSED),
-        ("b", Viseme.CLOSED),
-        ("m", Viseme.CLOSED),
-        ("f", Viseme.LABIODENTAL),
-        ("v", Viseme.LABIODENTAL),
-        ("θ", Viseme.DENTAL),
-        ("ð", Viseme.DENTAL),
-        ("t", Viseme.ALVEOLAR),
-        ("s", Viseme.ALVEOLAR),
-        ("z", Viseme.ALVEOLAR),
-        ("k", Viseme.VELAR),
-        ("g", Viseme.VELAR),
-        ("ŋ", Viseme.VELAR),
-        ("ʃ", Viseme.AFFRICATE),
-        ("i", Viseme.WIDE),
-        ("ɪ", Viseme.WIDE),
-        ("æ", Viseme.WIDE),
-        ("ɑ", Viseme.OPEN),
-        ("ʌ", Viseme.OPEN),
-        ("u", Viseme.ROUNDED),
-        ("ʊ", Viseme.ROUNDED),
-        ("ɔ", Viseme.ROUNDED),
-        ("w", Viseme.ROUNDED),
-        ("ə", Viseme.MID),
-    ])
-    def test_known_phonemes(self, ph, expected):
-        assert phoneme_to_viseme(ph) == expected
-
-    def test_diphthong_falls_to_first_char(self):
-        assert phoneme_to_viseme("aɪ") == Viseme.OPEN
-        assert phoneme_to_viseme("oʊ") == Viseme.ROUNDED
-
-    def test_decorated_phoneme(self):
-        assert phoneme_to_viseme("ˈɑː") == Viseme.OPEN
-        assert phoneme_to_viseme("iː") == Viseme.WIDE
-
-    def test_silence_symbols(self):
-        for s in ("", "_", "#", "sp", "sil"):
-            assert phoneme_to_viseme(s) == Viseme.SILENCE
-
-    def test_none_is_silence(self):
-        assert phoneme_to_viseme(None) == Viseme.SILENCE
-
-    def test_unknown_ascii_vowel_fallback(self):
-        assert phoneme_to_viseme("A") == Viseme.OPEN  # case-insensitive
-        assert phoneme_to_viseme("E") == Viseme.WIDE
-
-    def test_unknown_consonant_fallback_alveolar(self):
-        # An unmapped letter consonant reads better as a neutral alveolar.
-        assert phoneme_to_viseme(" q") == Viseme.ALVEOLAR or \
-            phoneme_to_viseme("q") == Viseme.ALVEOLAR
-
-    def test_unknown_symbol_default(self):
-        assert phoneme_to_viseme("@@@", default=Viseme.MID) == Viseme.MID
-
-    def test_custom_table_override(self):
-        custom = {"p": Viseme.OPEN}
-        assert phoneme_to_viseme("p", table=custom) == Viseme.OPEN
+class TestSpeechDuration:
+    """Test speech duration estimation."""
+    
+    def test_estimate_empty_text(self):
+        """Verify minimum duration for empty text."""
+        duration = estimate_speech_duration("")
+        assert duration == 0.1
+    
+    def test_estimate_single_word(self):
+        """Verify duration for single word."""
+        duration = estimate_speech_duration("hello")
+        assert duration >= 0.5
+    
+    def test_estimate_multiple_words(self):
+        """Verify duration scales with word count."""
+        short_text = "hello"
+        long_text = "hello world this is a test"
+        
+        short_duration = estimate_speech_duration(short_text)
+        long_duration = estimate_speech_duration(long_text)
+        
+        assert long_duration > short_duration
+    
+    def test_estimate_custom_wpm(self):
+        """Verify custom words per minute affects duration."""
+        text = "hello world"
+        slow = estimate_speech_duration(text, wpm=100)
+        fast = estimate_speech_duration(text, wpm=200)
+        
+        assert slow > fast
 
 
-class TestVisemeMapper:
-    def test_default_table_merged(self):
-        m = VisemeMapper()
-        assert m.map_one("p") == Viseme.CLOSED
+class TestSimpleVisemeEvents:
+    """Test simple viseme event creation."""
+    
+    def test_create_empty_text(self):
+        """Verify empty text returns empty list."""
+        events = create_simple_viseme_events("", 1.0)
+        assert len(events) == 0
+    
+    def test_create_zero_duration(self):
+        """Verify zero duration returns empty list."""
+        events = create_simple_viseme_events("hello", 0.0)
+        assert len(events) == 0
+    
+    def test_create_basic_text(self):
+        """Verify events created for basic text."""
+        events = create_simple_viseme_events("hello", 1.0)
+        
+        assert len(events) > 0
+        assert all(isinstance(e, PhonemeEvent) for e in events)
+        assert all(e.start_time >= 0 for e in events)
+        assert all(e.duration > 0 for e in events)
+    
+    def test_create_events_cover_duration(self):
+        """Verify events span the full duration."""
+        duration = 2.0
+        events = create_simple_viseme_events("hello world", duration)
+        
+        if events:
+            last_event = events[-1]
+            total_time = last_event.start_time + last_event.duration
+            assert total_time == pytest.approx(duration, rel=0.01)
+    
+    def test_create_bilabial_shapes(self):
+        """Verify bilabial characters create CLOSED mouth."""
+        events = create_simple_viseme_events("bpm", 1.0)
+        
+        from mimosa.avatar.mouth_shapes import MouthShape
+        for event in events:
+            assert event.mouth_shape == MouthShape.CLOSED
+    
+    def test_create_events_sequential(self):
+        """Verify events are sequential (no gaps)."""
+        events = create_simple_viseme_events("test", 1.0)
+        
+        for i in range(len(events) - 1):
+            current_end = events[i].start_time + events[i].duration
+            next_start = events[i + 1].start_time
+            assert current_end == pytest.approx(next_start, abs=0.001)
 
-    def test_custom_overrides_default(self):
-        m = VisemeMapper(table={"p": Viseme.OPEN})
-        assert m.map_one("p") == Viseme.OPEN
-        # built-ins still present
-        assert m.map_one("m") == Viseme.CLOSED
 
-    def test_map_many(self):
-        m = VisemeMapper()
-        out = m.map_many(["h", "ə", "l", "oʊ"])
-        assert out == [Viseme.VELAR, Viseme.MID, Viseme.ALVEOLAR, Viseme.ROUNDED]
-
-    def test_visemes_property(self):
-        m = VisemeMapper()
-        assert Viseme.OPEN in m.visemes
-        assert len(m.visemes) == 11
-
-    def test_default_table_is_not_mutated(self):
-        before = dict(DEFAULT_PHONEME_TO_VISEME)
-        VisemeMapper(table={"zzz": Viseme.OPEN})
-        assert DEFAULT_PHONEME_TO_VISEME == before
+class TestSyllableCount:
+    """Test syllable counting heuristic."""
+    
+    def test_count_empty_string(self):
+        """Verify empty string returns 1."""
+        count = estimate_syllable_count("")
+        assert count == 1
+    
+    def test_count_single_vowel(self):
+        """Verify single vowel word."""
+        count = estimate_syllable_count("a")
+        assert count == 1
+    
+    def test_count_multiple_syllables(self):
+        """Verify multi-syllable words."""
+        count = estimate_syllable_count("hello")  # hel-lo
+        assert count >= 2
+    
+    def test_count_consecutive_vowels(self):
+        """Verify consecutive vowels count as one."""
+        count = estimate_syllable_count("eat")  # ea = one vowel group
+        assert count >= 1
+    
+    def test_count_no_vowels(self):
+        """Verify consonant-only returns minimum."""
+        count = estimate_syllable_count("xyz")
+        assert count == 1

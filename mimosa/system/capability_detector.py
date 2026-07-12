@@ -43,6 +43,32 @@ LEVEL_GPU = "gpu"
 LEVEL_CPU = "cpu"
 LEVEL_INSUFFICIENT = "insufficient"
 
+# -- Avatar rendering tiers (Milestone 8.1) ---------------------------------
+#
+# The v2.0.0 avatar system ships in tiers. v2.0.0-alpha implements only the
+# universal 2D sprite baseline (which runs everywhere) and the legacy circle
+# fallback for genuinely constrained machines. The richer ``"live2d"`` (2.5D)
+# and ``"3d"`` tiers are reserved here so the detector's public contract is
+# stable for v2.1.0+ without another API change.
+TIER_3D = "3d"          # reserved for v2.1.0+: high-end GPU character models
+TIER_LIVE2D = "live2d"  # reserved for v2.1.0+: mid-tier 2.5D rigged avatars
+TIER_2D = "2d"          # universal animated 2D sprite baseline (this release)
+TIER_CIRCLE = "circle_only"  # fall back to the classic listening circle
+
+#: Tiers this build can actually render. Detection never returns a reserved
+#: tier until its renderer lands, so callers can trust the value.
+SUPPORTED_AVATAR_TIERS = (TIER_2D, TIER_CIRCLE)
+
+#: All tier identifiers, including reserved-for-future ones (stable strings).
+VALID_AVATAR_TIERS = (TIER_3D, TIER_LIVE2D, TIER_2D, TIER_CIRCLE)
+
+# Minimum resources for the universal 2D sprite avatar. These are far lighter
+# than *training* requirements -- the 2D renderer is a modest Cairo/GTK draw
+# loop, so almost any desktop that can show the circle can show a 2D sprite.
+# Below these we fall back to the classic circle to guarantee smooth UI.
+MIN_AVATAR_2D_RAM_GB = 2.0
+MIN_AVATAR_2D_CPU_CORES = 2
+
 
 @dataclass
 class CapabilityReport:
@@ -226,3 +252,66 @@ def detect_capability(
         report.level, ram_gb, disk_free_gb, cpu_cores, gpu_available, gpu_kind,
     )
     return report
+
+
+def detect_avatar_tier(report: Optional[CapabilityReport] = None, **kwargs) -> str:
+    """Pick the best avatar rendering tier the host can drive smoothly.
+
+    The v2.0.0 avatar system replaces the classic listening circle with an
+    animated character. This function decides *which* renderer to use. For
+    v2.0.0-alpha the only implemented tiers are the universal 2D sprite avatar
+    and the classic circle fallback, so this returns one of:
+
+    * ``"2d"``          -- the universal animated 2D sprite avatar (default on
+                           essentially every modern desktop).
+    * ``"circle_only"`` -- fall back to the legacy listening circle on machines
+                           too constrained (very low RAM / single core) to
+                           animate a sprite comfortably.
+
+    The richer ``"3d"`` and ``"live2d"`` tiers are intentionally *not* returned
+    yet -- their renderers land in v2.1.0+. The return value is guaranteed to be
+    a member of :data:`SUPPORTED_AVATAR_TIERS` so callers never receive a tier
+    they cannot render.
+
+    Args:
+        report: A pre-computed :class:`CapabilityReport`. When omitted, a fresh
+            scan runs via :func:`detect_capability` (``kwargs`` are forwarded,
+            which keeps the probes injectable for tests).
+
+    Returns:
+        ``"2d"`` or ``"circle_only"``. Never raises.
+    """
+    try:
+        if report is None:
+            report = detect_capability(**kwargs)
+
+        ram_gb = getattr(report, "ram_gb", None)
+        cpu_cores = getattr(report, "cpu_cores", None)
+
+        # Unknown values (probe failed) are treated optimistically: the 2D
+        # avatar is lightweight, so we only *drop* to the circle when we have
+        # concrete evidence the machine is genuinely too small.
+        enough_ram = ram_gb is None or ram_gb >= MIN_AVATAR_2D_RAM_GB
+        enough_cpu = cpu_cores is None or cpu_cores >= MIN_AVATAR_2D_CPU_CORES
+
+        tier = TIER_2D if (enough_ram and enough_cpu) else TIER_CIRCLE
+    except Exception:  # pragma: no cover - defensive; never break the UI
+        logger.debug("Avatar tier detection failed; defaulting to circle", exc_info=True)
+        logger.info(
+            "Avatar tier: %s (fallback \u2014 hardware probe failed)", TIER_CIRCLE
+        )
+        return TIER_CIRCLE
+
+    if tier == TIER_CIRCLE:
+        # Make the fallback explicit so users/log readers understand *why* the
+        # classic circle was chosen instead of the animated sprite avatar.
+        reasons = []
+        if not enough_ram:
+            reasons.append("low RAM")
+        if not enough_cpu:
+            reasons.append("few CPU cores")
+        reason = ", ".join(reasons) or "constrained hardware"
+        logger.info("Avatar tier: %s (fallback \u2014 %s)", tier, reason)
+    else:
+        logger.info("Avatar tier: %s", tier)
+    return tier

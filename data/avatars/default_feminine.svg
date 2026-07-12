@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 256 256" xmlns="https://img.magnific.com/free-vector/stylized-female-avatar-illustration_1308-177244.jpg?semt=ais_hybrid&w=740&q=80">
+  <!-- Feminine default avatar: warm colors, softer features -->
+  <defs>
+    <radialGradient id="skin-feminine" cx="50%" cy="50%">
+      <stop offset="0%" style="stop-color:#FFD4B8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FFAB8E;stop-opacity:1" />
+    </radialGradient>
+    <linearGradient id="hair-feminine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#8B4513;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#654321;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="256" height="256" fill="#E8F4F8"/>
+  
+  <!-- Neck/Shoulders -->
+  <ellipse cx="128" cy="240" rx="90" ry="40" fill="url(#skin-feminine)"/>
+  
+  <!-- Head -->
+  <ellipse cx="128" cy="110" rx="65" ry="75" fill="url(#skin-feminine)"/>
+  
+  <!-- Hair -->
+  <path d="M 63,80 Q 63,40 90,35 Q 110,32 128,30 Q 146,32 166,35 Q 193,40 193,80 L 193,120 Q 190,130 180,135 L 180,100 Q 180,90 175,85 L 175,140 Q 170,145 165,145 L 165,95 L 160,145 L 155,145 L 155,100 L 150,145 L 145,145 L 145,95 L 140,140 L 135,140 L 135,95 L 130,145 L 125,145 L 125,95 L 120,140 L 115,140 L 115,95 L 110,145 L 105,145 L 105,100 L 100,145 L 95,145 L 95,95 L 91,145 Q 86,145 81,140 L 81,85 Q 76,90 76,100 L 76,135 Q 66,130 63,120 Z" fill="url(#hair-feminine)"/>
+  
+  <!-- Eyes -->
+  <ellipse cx="100" cy="105" rx="8" ry="12" fill="#4A2810"/>
+  <ellipse cx="156" cy="105" rx="8" ry="12" fill="#4A2810"/>
+  <circle cx="100" cy="102" r="3" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="156" cy="102" r="3" fill="#FFFFFF" opacity="0.8"/>
+  
+  <!-- Eyebrows -->
+  <path d="M 88,90 Q 95,88 105,90" stroke="#4A2810" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M 151,90 Q 158,88 168,90" stroke="#4A2810" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  
+  <!-- Nose -->
+  <path d="M 128,115 L 125,130" stroke="#FFAB8E" stroke-width="2" fill="none" stroke-linecap="round"/>
+  
+  <!-- Mouth (neutral smile) -->
+  <path d="M 108,150 Q 128,158 148,150" stroke="#D4806B" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  
+  <!-- Blush -->
+  <ellipse cx="85" cy="125" rx="12" ry="8" fill="#FFB3A6" opacity="0.4"/>
+  <ellipse cx="171" cy="125" rx="12" ry="8" fill="#FFB3A6" opacity="0.4"/>
+</svg>

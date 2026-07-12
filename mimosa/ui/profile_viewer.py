@@ -204,8 +204,13 @@ def open_profile_viewer(
 ):
     """Show the profile viewer, or no-op gracefully when GTK is unavailable."""
 
-    if not HAS_GTK or ProfileViewer is None:
-        logger.info("Profile viewer requested but GTK is unavailable; skipping.")
+    from mimosa.ui.environment import has_display
+
+    if not HAS_GTK or ProfileViewer is None or not has_display():
+        logger.info(
+            "Profile viewer requested but no GUI is available "
+            "(GTK/display missing); skipping."
+        )
         if on_close is not None:
             try:
                 on_close()

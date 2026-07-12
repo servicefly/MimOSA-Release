@@ -280,8 +280,13 @@ def open_memory_viewer(
             relationship=relationship,
             questions=questions,
         )
-    if not HAS_GTK or MemoryViewer is None:
-        logger.warning("Memory viewer requested but GTK is unavailable")
+    from mimosa.ui.environment import has_display
+
+    if not HAS_GTK or MemoryViewer is None or not has_display():
+        logger.warning(
+            "Memory viewer requested but no GUI is available "
+            "(GTK/display missing)"
+        )
         if on_close is not None:
             try:
                 on_close()

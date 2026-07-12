@@ -10,6 +10,7 @@ import pytest
 
 from mimosa.utils.config import AppConfig, AppConfigManager
 from mimosa.ui.setup_wizard import (
+    STEP_AVATAR,
     STEP_FINISH,
     STEP_LLM,
     STEP_MICROPHONE,
@@ -46,8 +47,8 @@ def test_build_wizard_steps_order():
     steps = build_wizard_steps()
     assert [s.step_id for s in steps] == [
         STEP_WELCOME, STEP_MICROPHONE, STEP_SPEAKER, STEP_LLM,
-        STEP_PERSONALIZE, STEP_VOICE, STEP_WAKEWORD, STEP_PRIVACY, STEP_SYSTEM,
-        STEP_FINISH
+        STEP_PERSONALIZE, STEP_VOICE, STEP_AVATAR, STEP_WAKEWORD, STEP_PRIVACY,
+        STEP_SYSTEM, STEP_FINISH
     ]
     assert all(isinstance(s, WizardStep) for s in steps)
 
@@ -581,3 +582,94 @@ def test_wants_training_now_requires_name_and_pref(manager):
 def test_hardware_capability_returns_string(manager):
     w = SetupWizardController(manager)
     assert isinstance(w.hardware_capability(), str)
+
+
+
+# ---------------------------------------------------------------------------
+# Avatar presets (v2.0.0-beta wizard "Your Avatar" step, item #1)
+# ---------------------------------------------------------------------------
+
+
+def test_avatar_preset_options_shape(manager):
+    w = SetupWizardController(manager)
+    options = w.avatar_preset_options()
+    ids = [pid for pid, _l, _d in options]
+    assert set(ids) == {"feminine", "masculine", "neutral", "circle"}
+    for _pid, label, desc in options:
+        assert label and desc
+
+
+def test_select_avatar_preset_enables_and_pairs_voice(manager):
+    w = SetupWizardController(manager)
+    applied = w.select_avatar_preset("feminine")
+    assert applied == "feminine"
+    assert w.get_avatar_enabled() is True
+    assert w._working.personality.gender == "female"
+    # A feminine voice should be paired from the catalog.
+    assert w.get_selected_voice() is not None
+    assert w._working.avatar.tier in ("2d", "circle_only")
+
+
+def test_select_avatar_preset_circle_disables(manager):
+    w = SetupWizardController(manager)
+    w.select_avatar_preset("neutral")
+    assert w.get_avatar_enabled() is True
+    applied = w.select_avatar_preset("circle")
+    assert applied == "circle"
+    assert w.get_avatar_enabled() is False
+    assert w._working.avatar.tier == "circle_only"
+
+
+def test_select_avatar_preset_unknown_defaults_neutral(manager):
+    w = SetupWizardController(manager)
+    applied = w.select_avatar_preset("bogus")
+    assert applied == "neutral"
+    assert w.get_avatar_enabled() is True
+
+
+def test_get_selected_avatar_preset_reflects_state(manager):
+    w = SetupWizardController(manager)
+    # Selecting circle disables the avatar and is reported back as "circle".
+    w.select_avatar_preset("circle")
+    assert w.get_selected_avatar_preset() == "circle"
+    w.select_avatar_preset("masculine")
+    assert w.get_selected_avatar_preset() == "masculine"
+
+
+def test_avatar_preset_persists_on_finish(manager):
+    w = SetupWizardController(manager)
+    w.select_avatar_preset("masculine")
+    w.finish()
+    fresh = AppConfigManager(path=manager.path)
+    cfg = fresh.load()
+    assert cfg.avatar.enabled is True
+    assert cfg.personality.gender == "male"
+
+
+# ---------------------------------------------------------------------------
+# Voice picker (v2.0.0-beta wizard "Your Voice" step, item #7)
+# ---------------------------------------------------------------------------
+
+
+def test_voice_options_non_empty(manager):
+    w = SetupWizardController(manager)
+    options = w.voice_options()
+    assert len(options) > 0
+    for vid, name, _desc in options:
+        assert vid and name
+
+
+def test_set_and_get_selected_voice_round_trip(manager):
+    w = SetupWizardController(manager)
+    options = w.voice_options()
+    chosen = options[0][0]
+    w.set_selected_voice(chosen)
+    assert w.get_selected_voice() == chosen
+
+
+def test_set_selected_voice_blank_clears(manager):
+    w = SetupWizardController(manager)
+    w.set_selected_voice("en_US-amy-medium")
+    assert w.get_selected_voice() == "en_US-amy-medium"
+    w.set_selected_voice("   ")
+    assert w.get_selected_voice() is None

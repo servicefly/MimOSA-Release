@@ -1,3 +1,62 @@
+mimosa-assistant (2.0.0~beta-1) unstable; urgency=medium
+
+  * Polish sprint (v2.0.0-beta): 12 UX and robustness fixes on top of the
+    v2.0.0-alpha avatar system.
+  * New-install avatar defaults: fresh installs now enable the avatar with a
+    hardware-detected tier; upgraders keep the classic listening circle
+    (avatar.enabled=false) for backward compatibility.
+  * Setup wizard: new "Your Avatar" preset picker (feminine/masculine/neutral
+    /circle) with paired voice defaults, a "Your Voice" step with voice
+    dropdown and ▶ Play Sample audition button, and clearer step titles.
+  * Settings: new Avatar tab (enable, tier, voice, animation speed) with a
+    Play Sample button.
+  * Robustness: graceful degradation with no audio / no GTK / no GPU; audio
+    error-spam suppressed; clearer capability-detection and startup
+    visualization logging.
+  * Performance: opt-in avatar frame-rate governor (auto-throttle) that lowers
+    FPS then falls back to the circle under sustained load.
+  * Documentation: README "What's New in v2.0" section and docs/UPGRADING.md
+    (v1.1.0 → v2.0.0) migration guide.
+  * Testing: new integration tests (avatar pipeline, setup-to-launch) and
+    frame-rate governor unit tests.
+
+ -- A. Henry <servicefly@github.com>  Sun, 12 Jul 2026 12:00:00 -0400
+
+mimosa-assistant (2.0.0~alpha-1) unstable; urgency=medium
+
+  * Phase 8 / v2.0.0-alpha: The Avatar System — MimOSA gains a customizable
+    2D character avatar with emotions, lip sync, and gestures.
+  * Milestone 8.1 (Infrastructure): Avatar module with BaseAvatarRenderer and
+    Sprite2DRenderer, hardware capability detection (none/basic_2d/advanced_2d
+    /full_3d tiers), AvatarSettings configuration, AvatarCharacterWindow GTK4
+    transparent overlay.
+  * Milestone 8.2 (Generation): AI-powered avatar generation with Stable
+    Diffusion fallback, three hand-crafted SVG default avatars (feminine,
+    masculine, neutral), sprite processor with PIL/Pillow pipeline, cache
+    manager with automatic cleanup, preview dialog integrated into wizard.
+  * Milestone 8.3 (Animation): 6 emotion states (idle, listening, thinking,
+    speaking, happy, concerned), unified animator state machine with smooth
+    transitions, 8 phoneme-mapped mouth shapes (visemes), real-time lip sync
+    engine synchronized with TTS, 6 gesture animations (wave, thinking,
+    explaining, thumbs_up, shrug, point) with priority-based interpolation.
+  * Milestone 8.4 (Voice Integration): Expanded to 20 Piper voices with rich
+    metadata, voice auditioner backend, speech callback system with automatic
+    duration estimation, full pipeline: voice loop → GTK main thread →
+    renderer → animator → lip sync → animated mouth shapes.
+  * Documentation: Complete 505-line AVATAR_SYSTEM.md guide with features,
+    configuration, migration guide (v1.1.0 → v2.0.0-alpha), technical
+    architecture, performance benchmarks, troubleshooting, API reference.
+  * Technical: 13 new avatar modules (~5,400 lines), 114 new tests (1,782
+    total), 60 FPS on modern hardware / 30 FPS on low-end.
+  * Backward compatible: avatar.enabled defaults to false for existing users
+    (opt-in), preserving classic listening circle. New users get avatars by
+    default.
+  * Deferred to v2.1.0: Setup wizard voice+avatar selection UI, Settings
+    avatar tab, visual voice audition dialog (backends complete, UI polish
+    follows).
+
+ -- ServiceFly <info.markethiveapp@gmail.com>  Fri, 11 Jul 2026 18:00:00 +0000
+
 mimosa-assistant (1.1.0-1) unstable; urgency=medium
 
   * Milestone 4: Continuous Learning & Polish — MimOSA grows from a one-time

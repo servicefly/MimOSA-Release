@@ -33,7 +33,7 @@ import logging
 import wave
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +255,42 @@ class AudioManager:
             except Exception:  # pragma: no cover - defensive
                 pass
         return devices
+
+    @staticmethod
+    def check_audio_available() -> Tuple[bool, str]:
+        """Report whether a usable audio *input* device exists (item #3).
+
+        Designed to be called **once** at start-up so the voice loop can decide
+        whether to run at all, instead of spinning and logging the same
+        ``Invalid input device`` error on every iteration in headless / no-audio
+        environments (VMs, servers, broken sound stacks).
+
+        Never raises. Returns ``(available, reason)`` where ``reason`` is a short
+        human-readable explanation suitable for a single log line / notification:
+
+        * ``(False, "PyAudio is not installed")`` -- optional dependency missing.
+        * ``(False, "audio backend could not be initialised: ...")`` -- PortAudio
+          present but the backend failed to start (no sound server).
+        * ``(False, "no audio input device found")`` -- backend works but there
+          are no capture-capable devices.
+        * ``(True, "<device name>")`` -- at least one input device is present.
+        """
+        try:
+            import pyaudio  # noqa: F401 - probe only
+        except Exception:
+            return False, "PyAudio is not installed"
+
+        try:
+            devices = AudioManager.list_input_devices()
+        except Exception as exc:  # pragma: no cover - defensive
+            return False, f"audio backend could not be initialised: {exc}"
+
+        if not devices:
+            return False, "no audio input device found"
+
+        default = AudioManager.get_default_input_device()
+        name = default.name if default is not None else devices[0].name
+        return True, name
 
     @staticmethod
     def list_input_devices() -> List[AudioDevice]:

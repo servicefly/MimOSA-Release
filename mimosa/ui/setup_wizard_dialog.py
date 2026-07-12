@@ -20,10 +20,12 @@ from typing import Any, Callable, Optional
 
 from mimosa.ui.setup_wizard import (
     OLLAMA_INSTALL_URL,
+    STEP_AVATAR,
     STEP_FINISH,
     STEP_LLM,
     STEP_MICROPHONE,
     STEP_SPEAKER,
+    STEP_VOICE,
     STEP_WAKEWORD,
     SetupWizardController,
     WizardStep,
@@ -226,6 +228,10 @@ if HAS_GTK:
                 self._render_speaker()
             elif step.step_id == STEP_LLM:
                 self._render_llm()
+            elif step.step_id == STEP_VOICE:
+                self._render_voice()
+            elif step.step_id == STEP_AVATAR:
+                self._render_avatar()
             elif step.step_id == STEP_WAKEWORD:
                 self._render_wakeword()
             elif step.step_id == STEP_FINISH:
@@ -560,6 +566,149 @@ if HAS_GTK:
         def _flag_llm_incomplete(self) -> None:
             """Called when the user tries to advance without a valid choice."""
             self._update_llm_status()
+
+        # -- voice step (custom UI: voice picker + Play Sample) ------------
+
+        def _render_voice(self) -> None:
+            """Render the "Your Voice" step: a named voice picker with a
+            Play-Sample button, followed by the declarative wake-word /
+            sensitivity / STT fields the step declares."""
+            self._voice_options = self._controller.voice_options()
+
+            if self._voice_options:
+                picker = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                picker.append(Gtk.Label(label="Voice", xalign=0))
+                picker.append(Gtk.Box(hexpand=True))
+                labels = [f"{name} — {desc}" if desc else name
+                          for _vid, name, desc in self._voice_options]
+                self._voice_dropdown = Gtk.DropDown.new_from_strings(labels)
+                # Pre-select the currently-chosen voice, if any.
+                current = self._controller.get_selected_voice()
+                for i, (vid, _n, _d) in enumerate(self._voice_options):
+                    if vid == current:
+                        self._voice_dropdown.set_selected(i)
+                        break
+                self._voice_dropdown.connect("notify::selected",
+                                             self._on_voice_selected)
+                picker.append(self._voice_dropdown)
+
+                # ▶ Play Sample button (best-effort; degrades on no audio).
+                self._voice_play_btn = Gtk.Button(label="\u25b6 Play Sample")
+                self._voice_play_btn.set_tooltip_text(
+                    "Hear a short sample of the selected voice.")
+                self._voice_play_btn.connect("clicked", self._on_play_voice_sample)
+                picker.append(self._voice_play_btn)
+                self._fields_box.append(picker)
+
+                self._voice_status = Gtk.Label(xalign=0, wrap=True)
+                self._voice_status.add_css_class("dim-label")
+                self._fields_box.append(self._voice_status)
+                # Commit the pre-selected voice immediately.
+                self._on_voice_selected(self._voice_dropdown, None)
+
+                self._fields_box.append(Gtk.Separator(
+                    orientation=Gtk.Orientation.HORIZONTAL))
+
+            # Declarative fields (wake word, sensitivity, STT model).
+            for spec in self._controller.current_step.fields:
+                row, widget = self._build_field(spec)
+                self._fields_box.append(row)
+                self._widgets.append((spec, widget))
+
+        def _on_voice_selected(self, dropdown, _pspec) -> None:
+            idx = dropdown.get_selected()
+            if 0 <= idx < len(self._voice_options):
+                self._controller.set_selected_voice(self._voice_options[idx][0])
+
+        def _on_play_voice_sample(self, _button) -> None:
+            idx = self._voice_dropdown.get_selected()
+            if not (0 <= idx < len(self._voice_options)):
+                return
+            voice_id = self._voice_options[idx][0]
+            self._voice_play_btn.set_sensitive(False)
+            self._voice_status.set_text("Playing a sample…")
+
+            def _worker():
+                played = False
+                try:
+                    from mimosa.avatar.voice_library import VoiceAuditioner
+
+                    played = VoiceAuditioner().play_sample(voice_id)
+                except Exception:  # pragma: no cover - defensive
+                    played = False
+                GLib.idle_add(self._apply_voice_sample_result, played)
+
+            threading.Thread(target=_worker, name="mimosa-voice-sample",
+                             daemon=True).start()
+
+        def _apply_voice_sample_result(self, played: bool) -> bool:
+            self._voice_play_btn.set_sensitive(True)
+            if played:
+                self._voice_status.set_text("")
+            else:
+                self._voice_status.set_text(
+                    "Couldn't play a sample here (voice model or audio output "
+                    "unavailable). The voice will still work once set up.")
+            return False  # one-shot idle callback
+
+        # -- avatar step (custom UI: one-click preset picker) --------------
+
+        def _render_avatar(self) -> None:
+            """Render the "Your Avatar" step: a set of one-click starter
+            avatars (Feminine / Masculine / Neutral / classic circle) as a
+            radio group, plus a preview placeholder. The optional AI generator
+            entry is intentionally left for Settings to keep first-run simple.
+            """
+            prompt = Gtk.Label(
+                label="Pick a starter avatar — you can fine-tune or generate a "
+                      "custom one later in Settings.",
+                xalign=0, wrap=True)
+            self._fields_box.append(prompt)
+
+            self._avatar_radios = {}
+            current = self._controller.get_selected_avatar_preset()
+            group_leader = None
+            for pid, label, desc in self._controller.avatar_preset_options():
+                radio = Gtk.CheckButton(label=label)
+                if group_leader is None:
+                    group_leader = radio
+                else:
+                    radio.set_group(group_leader)
+                if pid == current:
+                    radio.set_active(True)
+                radio.connect("toggled", self._on_avatar_preset_toggled, pid)
+                self._fields_box.append(radio)
+                sub = Gtk.Label(label=desc, xalign=0, wrap=True)
+                sub.add_css_class("dim-label")
+                sub.set_margin_start(28)
+                self._fields_box.append(sub)
+                self._avatar_radios[pid] = radio
+
+            # Live preview placeholder. A full sprite preview lands with the
+            # renderer work (item #8); for now show a friendly status line so
+            # the selection feels acknowledged.
+            self._avatar_preview = Gtk.Label(xalign=0, wrap=True)
+            self._avatar_preview.add_css_class("dim-label")
+            self._avatar_preview.set_margin_top(8)
+            self._fields_box.append(self._avatar_preview)
+            self._refresh_avatar_preview(current)
+
+        def _on_avatar_preset_toggled(self, radio, preset_id) -> None:
+            if not radio.get_active():
+                return
+            applied = self._controller.select_avatar_preset(preset_id)
+            self._refresh_avatar_preview(applied)
+
+        def _refresh_avatar_preview(self, preset_id) -> None:
+            if getattr(self, "_avatar_preview", None) is None:
+                return
+            if preset_id == "circle":
+                self._avatar_preview.set_text(
+                    "MimOSA will show the classic animated listening circle.")
+            else:
+                voice = self._controller.get_selected_voice() or "the default voice"
+                self._avatar_preview.set_text(
+                    f"A {preset_id} character avatar, paired with {voice}.")
 
         # -- wake-word step (custom UI) ------------------------------------
 

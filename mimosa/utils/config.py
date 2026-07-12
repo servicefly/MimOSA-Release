@@ -170,6 +170,13 @@ QUESTION_FREQUENCY_LIMITS = {"rarely": 1, "balanced": 2, "often": 4}
 VALID_CAPABILITY_LEVELS = ("gpu", "cpu", "insufficient", "unknown")
 DEFAULT_CAPABILITY_LEVEL = "unknown"
 
+#: Avatar rendering tiers (Milestone 8.1). Mirrored from
+#: :mod:`mimosa.system.capability_detector` (its ``TIER_*`` constants) so config
+#: validation stays free of heavy imports. ``"3d"`` and ``"live2d"`` are
+#: reserved for v2.1.0+; only ``"2d"`` and ``"circle_only"`` render today.
+VALID_AVATAR_TIERS = ("3d", "live2d", "2d", "circle_only")
+DEFAULT_AVATAR_TIER = "circle_only"
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
@@ -765,6 +772,55 @@ class HardwareSettings:
         return self.capability_level in ("gpu", "cpu")
 
 
+@dataclass
+class AvatarSettings:
+    """Preferences for the v2.0.0 animated character avatar (Milestone 8.1).
+
+    v2.0.0 replaces the classic listening circle with an animated character
+    avatar. This section is *opt-in*: when ``enabled`` is ``False`` (the
+    default) MimOSA keeps rendering the familiar circle, so existing v1.1.0
+    users are never surprised by a new face until they choose one. Selecting an
+    avatar in Settings/the wizard flips ``enabled`` to ``True``.
+
+    Like every other section this is local-only -- generated sprites and the
+    chosen voice all live on-device; nothing is transmitted anywhere.
+    """
+
+    #: Whether the character avatar is shown instead of the listening circle.
+    enabled: bool = False
+    #: Rendering tier: "3d" | "live2d" | "2d" | "circle_only". Only "2d" and
+    #: "circle_only" render in this build (see :data:`VALID_AVATAR_TIERS`).
+    tier: str = DEFAULT_AVATAR_TIER
+    #: Absolute path to a custom sprite / sprite-sheet (``None`` => bundled
+    #: placeholder). Populated by the M8.2 generation pipeline.
+    custom_sprite_path: Optional[str] = None
+    #: Identifier of the TTS voice paired with this avatar (``None`` => the
+    #: voice section's default). Lets the avatar's look and voice stay in sync.
+    voice_id: Optional[str] = None
+
+    def validate(self) -> "AvatarSettings":
+        self.enabled = bool(self.enabled)
+        tier = str(self.tier or "").strip().lower()
+        self.tier = tier if tier in VALID_AVATAR_TIERS else DEFAULT_AVATAR_TIER
+        for attr in ("custom_sprite_path", "voice_id"):
+            value = getattr(self, attr)
+            if value is None:
+                continue
+            text = str(value).strip()
+            setattr(self, attr, text or None)
+        return self
+
+    def use_circle(self) -> bool:
+        """True when MimOSA should render the classic listening circle.
+
+        This is the single source of truth the UI consults to decide between
+        the new avatar and the legacy circle, keeping the fallback logic in one
+        place: the circle is used whenever the avatar is disabled *or* the tier
+        resolves to ``"circle_only"``.
+        """
+        return (not self.enabled) or self.tier == "circle_only"
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -789,6 +845,7 @@ class AppConfig:
     personality: PersonalitySettings = field(default_factory=PersonalitySettings)
     learning: LearningSettings = field(default_factory=LearningSettings)
     hardware: HardwareSettings = field(default_factory=HardwareSettings)
+    avatar: AvatarSettings = field(default_factory=AvatarSettings)
     ui: UIConfig = field(default_factory=UIConfig)
 
     def validate(self) -> "AppConfig":
@@ -806,6 +863,7 @@ class AppConfig:
         self.personality.validate()
         self.learning.validate()
         self.hardware.validate()
+        self.avatar.validate()
         self.ui.validate()
         return self
 
@@ -822,6 +880,7 @@ class AppConfig:
             "personality": asdict(self.personality),
             "learning": asdict(self.learning),
             "hardware": asdict(self.hardware),
+            "avatar": asdict(self.avatar),
             "ui": self.ui.to_dict(),
         }
 
@@ -850,6 +909,7 @@ class AppConfig:
             personality=_section(PersonalitySettings, "personality"),
             learning=_section(LearningSettings, "learning"),
             hardware=_section(HardwareSettings, "hardware"),
+            avatar=_section(AvatarSettings, "avatar"),
             ui=UIConfig.from_dict(data.get("ui") or {}),
         )
         return cfg.validate()
@@ -886,6 +946,51 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
     # Future migrations: `if version < 2: ...`
 
     return data
+
+
+def apply_new_install_avatar_defaults(
+    config: "AppConfig",
+    *,
+    detector: Optional[Callable[[], str]] = None,
+) -> "AppConfig":
+    """Enable the animated avatar with an auto-detected tier for a *new* install.
+
+    v2.0.0 ships the animated character avatar enabled by default, but only for
+    brand-new installs (no prior config on disk). Upgrades from v1.x keep the
+    avatar disabled so existing users are never surprised by a new face -- that
+    path simply never calls this function (see :meth:`AppConfigManager.load`).
+
+    The tier is auto-detected from the host's hardware via
+    :func:`mimosa.system.capability_detector.detect_avatar_tier`. On very
+    constrained machines that resolves to ``"circle_only"``, in which case
+    :meth:`AvatarSettings.use_circle` still renders the classic circle even
+    though ``enabled`` is ``True``.
+
+    Args:
+        config: The freshly-created default config to mutate in place.
+        detector: Optional tier-detector callable (injectable for tests).
+
+    Returns:
+        The same ``config`` instance, mutated and re-validated.
+    """
+    try:
+        if detector is None:
+            from mimosa.system.capability_detector import detect_avatar_tier
+            detector = detect_avatar_tier
+        tier = detector()
+    except Exception:  # pragma: no cover - never break first launch
+        logger.debug(
+            "Avatar tier detection failed on new install; using circle",
+            exc_info=True,
+        )
+        tier = DEFAULT_AVATAR_TIER
+    config.avatar.enabled = True
+    config.avatar.tier = tier
+    config.avatar.validate()
+    logger.info(
+        "New install detected: avatar enabled (tier=%s)", config.avatar.tier
+    )
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -964,11 +1069,23 @@ class AppConfigManager:
                 if not isinstance(data, dict):
                     raise ValueError("config root is not an object")
                 self._config = AppConfig.from_dict(data)
+                if "avatar" not in data:
+                    # Config predates the avatar system => upgrade from v1.x.
+                    # Preserve the old behaviour: keep the avatar disabled (the
+                    # dataclass default) so existing users still see the circle
+                    # until they opt in via Settings/the wizard.
+                    logger.info(
+                        "Existing config without an avatar section detected "
+                        "(v1.x upgrade); keeping avatar disabled."
+                    )
                 logger.debug("Loaded app config from %s", self._path)
             except FileNotFoundError:
-                logger.debug("No app config at %s; seeding from defaults/ui.json",
-                             self._path)
+                logger.debug("No app config at %s; seeding from defaults/ui.json "
+                             "(new install)", self._path)
                 self._config = AppConfig(ui=UIConfig.load())
+                # Brand-new install (no config file at all): turn the animated
+                # avatar on by default with an auto-detected tier (item #2).
+                apply_new_install_avatar_defaults(self._config)
                 self._config.validate()
             except Exception as exc:
                 logger.warning("Could not read app config %s (%s); using defaults",

@@ -146,6 +146,11 @@ class VoiceLoop:
         self._stop_requested = False
         self._paused = False
         self._state_listeners: list = []
+        #: Result of the one-time audio-hardware probe done in :meth:`run`
+        #: (item #3). ``None`` until the loop starts; then ``(available, reason)``.
+        #: ``app.py`` reads this to show a one-time "voice disabled" notice.
+        self.audio_available: Optional[bool] = None
+        self.audio_unavailable_reason: str = ""
 
     # -- state -------------------------------------------------------------
 
@@ -561,6 +566,23 @@ class VoiceLoop:
         transient audio glitch won't kill the assistant.
         """
         self._stop_requested = False
+
+        # Item #3: probe the audio hardware exactly ONCE up front. In headless /
+        # no-audio environments (VMs, servers, broken sound stacks) there is no
+        # input device, so we log a single clear warning and disable voice
+        # instead of spinning the loop and spamming the same error every
+        # iteration.
+        available, reason = self._probe_audio()
+        self.audio_available = available
+        if not available:
+            self.audio_unavailable_reason = reason
+            logger.warning(
+                "No audio input device found: %s. Voice features disabled.",
+                reason,
+            )
+            self._set_state(VoiceState.STOPPED)
+            return
+
         logger.info("Voice loop starting. Say the wake word to begin.")
         try:
             while not self._stop_requested:
@@ -584,6 +606,23 @@ class VoiceLoop:
 
     # -- helpers -----------------------------------------------------------
 
+    def _probe_audio(self) -> "tuple[bool, str]":
+        """Check for a usable audio input device exactly once (item #3).
+
+        Delegates to :meth:`AudioManager.check_audio_available`, using the
+        loop's own audio manager when it exposes the method, else the class-level
+        static probe. Never raises -- returns ``(available, reason)``.
+        """
+        try:
+            from mimosa.voice.audio_manager import AudioManager
+
+            probe = getattr(self._audio, "check_audio_available", None)
+            if probe is None:
+                probe = AudioManager.check_audio_available
+            return probe()
+        except Exception as exc:  # pragma: no cover - defensive
+            return False, f"audio probe failed: {exc}"
+
     def _await_wake_word(self) -> bool:
         """Block in IDLE until the wake word fires. Returns False if stopped."""
         self._set_state(VoiceState.IDLE)
@@ -605,10 +644,20 @@ class VoiceLoop:
         return detected["hit"] and not self._stop_requested
 
     def _speak(self, reply: str) -> None:
-        """Synthesize ``reply`` with TTS and play it; degrade gracefully."""
+        """Synthesize ``reply`` with TTS and play it; degrade gracefully.
+        
+        M8.4: Estimates speech duration and notifies avatar renderer for lip sync.
+        """
         if not reply:
             return
         self._set_state(VoiceState.SPEAKING)
+        
+        # M8.4: Estimate speech duration for avatar lip sync
+        speech_duration = self._estimate_speech_duration(reply)
+        
+        # Notify speech start (for avatar lip sync animation)
+        self._notify_speech_start(reply, speech_duration)
+        
         try:
             wav_bytes = self.tts.synthesize(reply)
             self.audio.play_wav_bytes(wav_bytes)
@@ -616,6 +665,65 @@ class VoiceLoop:
             # TTS/playback failures should not crash the loop -- log the reply
             # so the interaction is still observable in text.
             logger.error("Speech output failed (%s). Reply was: %r", exc, reply)
+        finally:
+            # Notify speech end
+            self._notify_speech_end()
+    
+    def _estimate_speech_duration(self, text: str) -> float:
+        """
+        Estimate speech duration from text.
+        
+        Args:
+            text: Text to be spoken
+            
+        Returns:
+            Estimated duration in seconds
+        """
+        try:
+            from mimosa.avatar.viseme_mapper import estimate_speech_duration
+            return estimate_speech_duration(text, wpm=150)
+        except Exception:
+            # Fallback: very rough estimate (assume 150 WPM)
+            words = len(text.split())
+            return max(1.0, words / 150.0 * 60.0)
+    
+    def _notify_speech_start(self, text: str, duration: float) -> None:
+        """
+        Notify observers that speech has started.
+        
+        Args:
+            text: Text being spoken
+            duration: Estimated duration in seconds
+        """
+        # Check if we have a speech callback registered
+        callback = getattr(self, '_speech_start_callback', None)
+        if callback and callable(callback):
+            try:
+                callback(text, duration)
+            except Exception as exc:
+                logger.debug("Speech start callback failed: %s", exc)
+    
+    def _notify_speech_end(self) -> None:
+        """Notify observers that speech has ended."""
+        callback = getattr(self, '_speech_end_callback', None)
+        if callback and callable(callback):
+            try:
+                callback()
+            except Exception as exc:
+                logger.debug("Speech end callback failed: %s", exc)
+    
+    def set_speech_callbacks(self, on_start=None, on_end=None):
+        """
+        Register callbacks for speech events (M8.4: avatar lip sync integration).
+        
+        Args:
+            on_start: Callable[(text: str, duration: float), None] - called when speech starts
+            on_end: Callable[[], None] - called when speech ends
+        """
+        if on_start is not None:
+            self._speech_start_callback = on_start
+        if on_end is not None:
+            self._speech_end_callback = on_end
 
     def shutdown(self) -> None:
         """Release backend resources (audio, wake-word engine)."""

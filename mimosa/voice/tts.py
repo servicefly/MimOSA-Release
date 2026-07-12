@@ -56,27 +56,37 @@ DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
 # while the first entry of each list is the preferred "speaking" voice for
 # MimOSA's own responses.
 
-#: Female-presenting Piper voices, most-preferred first.
+#: Female-presenting Piper voices, most-preferred first (M8.4: expanded library).
 FEMALE_VOICES = (
-    "en_US-amy-medium",
-    "en_US-hfc_female-medium",
-    "en_US-kathleen-low",
-    "en_GB-alba-medium",
+    "en_US-amy-medium",              # Clear, warm voice
+    "en_US-hfc_female-medium",       # Natural, friendly
+    "en_US-kathleen-low",            # Calm, soothing
+    "en_GB-alba-medium",              # British accent
+    "en_GB-jenny_dioco-medium",      # Expressive British
+    "en_US-amy-low",                 # Deeper variant
+    "en_GB-semaine-medium",          # Articulate
+    "en_GB-southern_english_female-low",  # Clear British
 )
 
-#: Male-presenting Piper voices, most-preferred first.
+#: Male-presenting Piper voices, most-preferred first (M8.4: expanded library).
 MALE_VOICES = (
-    "en_US-ryan-medium",
-    "en_US-joe-medium",
-    "en_US-danny-low",
-    "en_GB-northern_english_male-medium",
+    "en_US-ryan-medium",             # Natural, clear
+    "en_US-joe-medium",              # Warm, friendly
+    "en_US-danny-low",               # Deep, calm
+    "en_GB-northern_english_male-medium",  # British accent
+    "en_US-ryan-low",                # Deeper variant
+    "en_US-ryan-high",               # Higher pitch
+    "en_GB-alan-medium",             # British articulate
+    "en_GB-cori-medium",             # Scottish accent
 )
 
 #: Neutral / unspecified voices, most-preferred first. ``lessac`` is MimOSA's
 #: long-standing default and stays first so the neutral experience is unchanged.
 NEUTRAL_VOICES = (
-    DEFAULT_PIPER_VOICE,            # en_US-lessac-medium
-    "en_US-libritts_r-medium",
+    DEFAULT_PIPER_VOICE,             # en_US-lessac-medium (classic default)
+    "en_US-libritts_r-medium",       # Balanced, neutral
+    "en_US-kristin-medium",          # Clear, professional
+    "en_GB-aru-medium",              # Neutral British
 )
 
 _GENDER_VOICES = {

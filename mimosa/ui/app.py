@@ -80,6 +80,9 @@ class MimOSAApplication:
         self._settings_dialog = None
         self._voice_thread: Optional[threading.Thread] = None
         self._services = None
+        # Item #3: ensure the "no audio device -> voice disabled" notice is
+        # shown at most once per session.
+        self._audio_notice_shown = False
         # M4.3 companions (all optional / created lazily under GTK).
         self._tray = None
         self._chat_controller = None
@@ -189,6 +192,11 @@ class MimOSAApplication:
 
     def _start_voice_thread(self) -> None:
         """Run the voice loop on a daemon worker thread (GUI mode)."""
+        # Item #3: check for audio hardware once up front so we can show a
+        # single, non-blocking notice if voice will be unavailable (instead of
+        # letting the loop spam errors). This never blocks startup.
+        self._maybe_notify_no_audio()
+
         def _run():
             try:
                 self.voice_loop.run()
@@ -197,6 +205,37 @@ class MimOSAApplication:
 
         self._voice_thread = threading.Thread(target=_run, name="mimosa-voice", daemon=True)
         self._voice_thread.start()
+
+    def _maybe_notify_no_audio(self) -> None:
+        """Show a one-time, non-blocking notice when no audio input exists.
+
+        Item #3: on headless / no-audio hosts the voice loop disables itself and
+        logs a single warning. Here we surface that to the user exactly once via
+        a desktop notification (best-effort), so they understand why voice is
+        off without the console being flooded.
+        """
+        if self._audio_notice_shown:
+            return
+        try:
+            from mimosa.voice.audio_manager import AudioManager
+
+            available, reason = AudioManager.check_audio_available()
+        except Exception:  # pragma: no cover - defensive
+            return
+        if available:
+            return
+        self._audio_notice_shown = True
+        message = (
+            f"No microphone was found ({reason}). Voice features are disabled; "
+            "you can still chat with MimOSA in the window."
+        )
+        logger.warning("Audio input unavailable: %s. Voice features disabled.", reason)
+        try:
+            from mimosa.system.kde_integration import KDEIntegration
+
+            KDEIntegration().send_notification("MimOSA: voice disabled", message)
+        except Exception:  # pragma: no cover - notifications are best-effort
+            logger.debug("Could not send no-audio desktop notification", exc_info=True)
 
     def shutdown(self) -> None:
         """Stop the voice loop and detach the bridge (idempotent)."""
@@ -663,6 +702,16 @@ class MimOSAApplication:
             self.window = window
             window_manager.apply_to_window(window)
 
+            # Make the active visualization explicit in the logs so it's clear
+            # whether the character avatar or the classic circle is showing and
+            # (when the circle) why (item #12 logging cleanup).
+            av = self.config.avatar
+            if av.use_circle():
+                reason = "avatar disabled" if not av.enabled else "circle_only tier"
+                logger.info("Visualization: classic listening circle (%s)", reason)
+            else:
+                logger.info("Visualization: character avatar (tier=%s)", av.tier)
+
             # First-run setup wizard (M4.2), modal to the avatar.
             self._maybe_run_setup_wizard(transient_for=window)
 
@@ -682,6 +731,9 @@ class MimOSAApplication:
 
             self.bridge = StateBridge(on_state_change=_on_state_change)
             self.bridge.subscribe(self.voice_loop)
+
+            # M8.4: Wire avatar lip sync to speech events
+            self._wire_avatar_speech_callbacks(window)
 
             # Optional system-tray companion (M4.3); no-op when unavailable.
             self._build_system_tray(application)
@@ -817,6 +869,51 @@ class MimOSAApplication:
             dialog.present()
         except Exception:  # pragma: no cover - defensive
             logger.debug("About dialog could not be shown.", exc_info=True)
+
+    def _wire_avatar_speech_callbacks(self, window) -> None:
+        """
+        Connect voice loop speech events to avatar renderer for lip sync (M8.4).
+        
+        Args:
+            window: The AvatarWindow instance
+        """
+        try:
+            # Check if the renderer supports speech animation (Sprite2DRenderer does)
+            renderer = getattr(window, 'renderer', None)
+            if renderer is None:
+                return
+            
+            # Check if renderer has the required methods
+            if not (hasattr(renderer, 'start_speaking') and hasattr(renderer, 'stop_speaking')):
+                logger.debug("Renderer does not support speech callbacks")
+                return
+            
+            # Define thread-safe callback wrappers that marshal to GTK main thread
+            import gi
+            gi.require_version("GLib", "2.0")
+            from gi.repository import GLib
+            
+            def on_speech_start(text: str, duration: float):
+                """Called when TTS starts speaking (worker thread)."""
+                # Marshal to GTK main thread
+                GLib.idle_add(lambda: renderer.start_speaking(text, duration))
+            
+            def on_speech_end():
+                """Called when TTS finishes speaking (worker thread)."""
+                # Marshal to GTK main thread
+                GLib.idle_add(lambda: renderer.stop_speaking())
+            
+            # Register callbacks with voice loop
+            self.voice_loop.set_speech_callbacks(
+                on_start=on_speech_start,
+                on_end=on_speech_end
+            )
+            
+            logger.debug("Avatar speech callbacks wired successfully")
+            
+        except Exception as exc:
+            # Non-fatal - avatar will work without lip sync
+            logger.debug("Could not wire avatar speech callbacks: %s", exc)
 
     def _build_system_tray(self, application=None) -> None:
         """Create the system-tray companion if a back-end is available (M4.3)."""

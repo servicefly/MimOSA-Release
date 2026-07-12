@@ -547,3 +547,91 @@ class TestVoiceLoopContinuousLearner:
             response_handler=lambda t: f"reply:{t}",
         )
         assert loop._generate_reply("hi") == "reply:hi"
+
+
+
+# ---------------------------------------------------------------------------
+# Item #3: audio-availability probe + one-time voice disable
+# ---------------------------------------------------------------------------
+
+class TestCheckAudioAvailable:
+    def test_returns_false_without_pyaudio(self, monkeypatch):
+        # Simulate PyAudio missing: the import inside the method fails.
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pyaudio":
+                raise ImportError("no pyaudio")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        ok, reason = am.AudioManager.check_audio_available()
+        assert ok is False
+        assert "PyAudio" in reason
+
+    def test_returns_false_when_no_input_devices(self, monkeypatch):
+        # PyAudio "present" but no capture devices enumerated.
+        monkeypatch.setattr(am.AudioManager, "list_input_devices",
+                            staticmethod(lambda: []))
+        # Pretend the pyaudio import succeeds.
+        import builtins
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pyaudio":
+                return object()
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        ok, reason = am.AudioManager.check_audio_available()
+        assert ok is False
+        assert "no audio input device" in reason
+
+    def test_returns_true_with_a_device(self, monkeypatch):
+        dev = am.AudioDevice(index=2, name="USB Mic",
+                             max_input_channels=1, max_output_channels=0,
+                             default_sample_rate=16000)
+        monkeypatch.setattr(am.AudioManager, "list_input_devices",
+                            staticmethod(lambda: [dev]))
+        monkeypatch.setattr(am.AudioManager, "get_default_input_device",
+                            staticmethod(lambda: dev))
+        import builtins
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pyaudio":
+                return object()
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        ok, reason = am.AudioManager.check_audio_available()
+        assert ok is True
+        assert reason == "USB Mic"
+
+
+class TestVoiceLoopNoAudio:
+    def test_run_disables_voice_when_no_audio(self, monkeypatch):
+        """run() must probe once, log a single warning, and return -- no loop."""
+        loop = vl.VoiceLoop(audio_manager=_FakeAudio())
+        # Force the probe to report "no audio".
+        monkeypatch.setattr(loop, "_probe_audio",
+                            lambda: (False, "no audio input device found"))
+        # If the loop body ran, this would be called; make it explode so the
+        # test fails loudly if we don't return early.
+        monkeypatch.setattr(loop, "run_once",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("loop ran")))
+        loop.run()
+        assert loop.audio_available is False
+        assert "no audio input device" in loop.audio_unavailable_reason
+        assert loop.state is vl.VoiceState.STOPPED
+
+    def test_probe_audio_uses_manager_method_when_present(self):
+        class _AudioWithProbe(_FakeAudio):
+            @staticmethod
+            def check_audio_available():
+                return (True, "Fake Mic")
+
+        loop = vl.VoiceLoop(audio_manager=_AudioWithProbe())
+        assert loop._probe_audio() == (True, "Fake Mic")

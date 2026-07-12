@@ -34,6 +34,7 @@ from typing import Any, Callable, Dict, Optional
 from mimosa import __author__, __version__
 from mimosa.ui.settings_logic import (
     PAGE_ABOUT,
+    PAGE_AVATAR,
     PAGE_LEARNING,
     PAGE_PRIVACY,
     PAGE_SKILLS,
@@ -196,7 +197,56 @@ if HAS_GTK:
                 box.append(self._build_privacy_extras())
             if page.page_id == PAGE_LEARNING:
                 box.append(self._build_learning_extras())
+            if page.page_id == PAGE_AVATAR:
+                box.append(self._build_avatar_extras())
             return box
+
+        def _build_avatar_extras(self) -> "Gtk.Widget":
+            """A "▶ Play Sample" button auditioning the selected avatar voice."""
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            self._avatar_sample_btn = Gtk.Button(label="\u25b6 Play Sample")
+            self._avatar_sample_btn.set_tooltip_text(
+                "Hear a short sample of the selected avatar voice.")
+            self._avatar_sample_btn.connect("clicked", self._on_play_avatar_sample)
+            row.append(self._avatar_sample_btn)
+            self._avatar_sample_status = Gtk.Label(xalign=0.0, wrap=True)
+            self._avatar_sample_status.add_css_class("dim-label")
+            self._avatar_sample_status.set_hexpand(True)
+            row.append(self._avatar_sample_status)
+            box.append(row)
+            return box
+
+        def _on_play_avatar_sample(self, _button) -> None:
+            voice_id = self.controller.get_value("avatar", "voice_id")
+            if not voice_id:
+                self._avatar_sample_status.set_text(
+                    "Pick a specific voice above to hear a sample.")
+                return
+            self._avatar_sample_btn.set_sensitive(False)
+            self._avatar_sample_status.set_text("Playing a sample…")
+
+            def _worker():
+                played = False
+                try:
+                    from mimosa.avatar.voice_library import VoiceAuditioner
+
+                    played = VoiceAuditioner().play_sample(voice_id)
+                except Exception:  # pragma: no cover - defensive
+                    played = False
+                GLib.idle_add(self._apply_avatar_sample_result, played)
+
+            import threading
+            threading.Thread(target=_worker, name="mimosa-settings-sample",
+                             daemon=True).start()
+
+        def _apply_avatar_sample_result(self, played: bool) -> bool:
+            self._avatar_sample_btn.set_sensitive(True)
+            self._avatar_sample_status.set_text(
+                "" if played else
+                "Couldn't play a sample here (voice model or audio output "
+                "unavailable).")
+            return False  # one-shot idle callback
 
         def _build_field_row(self, spec: FieldSpec) -> "Gtk.Widget":
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Neutral default avatar: balanced features, mixed aesthetics -->
+  <defs>
+    <radialGradient id="skin-neutral" cx="50%" cy="50%">
+      <stop offset="0%" style="stop-color:#F5DEC3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E5C8A0;stop-opacity:1" />
+    </radialGradient>
+    <linearGradient id="hair-neutral" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#6B4423;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4A2F1A;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="256" height="256" fill="#E0E8E8"/>
+  
+  <!-- Neck/Shoulders -->
+  <path d="M 53,220 Q 53,210 65,210 L 191,210 Q 203,210 203,220 L 203,256 L 53,256 Z" fill="url(#skin-neutral)"/>
+  
+  <!-- Head (balanced oval) -->
+  <ellipse cx="128" cy="110" rx="60" ry="72" fill="url(#skin-neutral)"/>
+  
+  <!-- Hair (medium length, balanced style) -->
+  <path d="M 68,75 Q 68,40 90,35 Q 109,32 128,30 Q 147,32 166,35 Q 188,40 188,75 L 188,115 Q 185,122 178,125 L 178,95 Q 178,88 173,85 L 173,130 L 168,132 L 168,100 L 163,132 L 158,132 L 158,98 L 153,130 L 148,130 L 148,95 L 143,128 L 138,128 L 138,95 L 133,130 L 128,130 L 128,93 L 123,130 L 118,130 L 118,95 L 113,128 L 108,128 L 108,95 L 103,130 L 98,130 L 98,98 L 93,132 L 88,132 L 88,100 L 83,125 Q 78,122 76,115 L 76,83 Q 72,88 70,95 L 70,115 Q 68,118 68,115 Z" fill="url(#hair-neutral)"/>
+  
+  <!-- Eyes -->
+  <ellipse cx="100" cy="105" rx="10" ry="13" fill="#3D2816"/>
+  <ellipse cx="156" cy="105" rx="10" ry="13" fill="#3D2816"/>
+  <circle cx="100" cy="102" r="3" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="156" cy="102" r="3" fill="#FFFFFF" opacity="0.8"/>
+  
+  <!-- Eyebrows (balanced) -->
+  <path d="M 88,90 Q 95,87 106,89" stroke="#3D2816" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M 150,89 Q 157,87 168,90" stroke="#3D2816" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  
+  <!-- Nose -->
+  <path d="M 128,112 L 126,132 M 122,130 L 126,132 L 130,130" stroke="#D5B18A" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Mouth (neutral expression) -->
+  <path d="M 108,152 Q 128,156 148,152" stroke="#C6A47A" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  
+  <!-- Subtle cheek definition -->
+  <ellipse cx="88" cy="125" rx="10" ry="7" fill="#E5C8A0" opacity="0.3"/>
+  <ellipse cx="168" cy="125" rx="10" ry="7" fill="#E5C8A0" opacity="0.3"/>
+</svg>

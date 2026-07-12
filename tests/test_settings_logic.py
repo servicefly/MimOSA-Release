@@ -43,8 +43,21 @@ def test_page_specs_cover_all_required_pages():
     ids = [p.page_id for p in build_page_specs()]
     assert ids == [
         PAGE_VOICE, PAGE_PERSONALIZE, PAGE_SKILLS, "system", PAGE_PRIVACY,
-        PAGE_TASKS, PAGE_RESEARCH, PAGE_UI, "learning", PAGE_ABOUT,
+        PAGE_TASKS, PAGE_RESEARCH, PAGE_UI, "avatar", "learning", PAGE_ABOUT,
     ]
+
+
+def test_avatar_page_has_expected_fields():
+    pages = {p.page_id: p for p in build_page_specs()}
+    assert "avatar" in pages
+    avatar = pages["avatar"]
+    names = {(f.section, f.name) for f in avatar.fields}
+    assert ("avatar", "enabled") in names
+    assert ("avatar", "tier") in names
+    assert ("avatar", "voice_id") in names
+    # Every field carries a label + help for accessibility.
+    for f in avatar.fields:
+        assert f.label
 
 
 def test_tasks_and_research_pages_have_toggles_and_help():
