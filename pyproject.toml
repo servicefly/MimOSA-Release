@@ -36,7 +36,7 @@ dependencies = [
 [project.optional-dependencies]
 # Full local voice pipeline (wake word + STT + TTS + audio I/O).
 voice = [
-    "openwakeword>=0.6,<0.7",
+    "openwakeword>=0.7,<1.0",
     "openai-whisper>=20231117",
     "piper-tts>=1.2,<2.0",
     "pyaudio>=0.2.13,<0.3",
@@ -57,7 +57,7 @@ dev = [
 ]
 # Everything (convenience meta-extra).
 all = [
-    "openwakeword>=0.6,<0.7",
+    "openwakeword>=0.7,<1.0",
     "openai-whisper>=20231117",
     "piper-tts>=1.2,<2.0",
     "pyaudio>=0.2.13,<0.3",
