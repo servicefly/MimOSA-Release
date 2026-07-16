@@ -98,7 +98,10 @@ elif [[ $WITH_UI -eq 1 ]]; then
 fi
 
 echo ">> Installing MimOSA${EXTRAS:+ with extras $EXTRAS}"
-python -m pip install -e ".${EXTRAS}"
+# --no-warn-conflicts: on a re-install openWakeWord is already present without
+# tflite-runtime (by design -- see below), which would otherwise make pip print
+# a scary but harmless conflict notice here.
+python -m pip install --no-warn-conflicts -e ".${EXTRAS}"
 
 # --- 3a. openWakeWord (without its tflite-runtime dependency) --------------
 # openWakeWord lists `tflite-runtime` as a mandatory Linux dependency, but that
@@ -109,15 +112,22 @@ python -m pip install -e ".${EXTRAS}"
 # MimOSA forces the ONNX backend at runtime (see mimosa/voice/wake_word.py).
 if [[ $WITH_VOICE -eq 1 ]]; then
     echo ">> Installing openWakeWord (ONNX backend, without tflite-runtime)"
-    if ! python -m pip install --no-deps "openwakeword>=0.6,<0.7"; then
+    # --no-warn-conflicts silences pip's "openwakeword requires tflite-runtime,
+    # which is not installed" notice. That notice is EXPECTED and harmless here:
+    # we intentionally omit tflite-runtime (no wheels for Python 3.12+) and run
+    # openWakeWord on onnxruntime instead. The notice does not mean the install
+    # failed.
+    if ! python -m pip install --no-deps --no-warn-conflicts "openwakeword>=0.6,<0.7"; then
         echo "   ! openWakeWord install failed; MimOSA will use the energy-based" >&2
         echo "     wake-word fallback. Voice still works." >&2
     else
         # openWakeWord's real runtime deps (tflite-runtime intentionally omitted).
-        python -m pip install \
+        python -m pip install --no-warn-conflicts \
             "onnxruntime>=1.10,<2" "tqdm>=4.0,<5.0" "scipy>=1.3,<2" \
             "scikit-learn>=1,<2" "requests>=2.0,<3" \
             || echo "   ! Some openWakeWord runtime deps failed to install." >&2
+        echo "   (If pip printed a 'tflite-runtime is not installed' notice above,"
+        echo "    it is expected and safe -- MimOSA uses the ONNX backend.)"
     fi
 fi
 
