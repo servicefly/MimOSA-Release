@@ -1025,13 +1025,29 @@ class SetupWizardController:
             logger.debug("Voice pairing lookup failed for %s", gender, exc_info=True)
         return None
 
+    def default_avatar_preset(self) -> str:
+        """Return the id of the friendly default character preset.
+
+        This is the FIRST non-circle preset, used to pre-select a character
+        avatar when the user hasn't made an explicit choice yet (so new users
+        get a face by default rather than the classic circle).
+        """
+        for pid, _label, _desc, _g in self.AVATAR_PRESETS:
+            if pid != "circle":
+                return pid
+        return "neutral"
+
     def get_selected_avatar_preset(self) -> str:
         """Return the currently-selected preset id.
 
-        Derives the selection from the working config: if the avatar is
-        disabled we report ``"circle"``; otherwise we match the paired voice /
-        personalization gender back to a preset, defaulting to ``"neutral"``.
+        Until the user explicitly picks a preset, we default to the friendly
+        first character (not ``"circle"``) so new users end up with an avatar.
+        Once a choice is made we honour it: a disabled avatar reports
+        ``"circle"``; otherwise we match the paired voice / personalization
+        gender back to a preset, defaulting to ``"neutral"``.
         """
+        if not getattr(self, "_avatar_preset_explicit", False):
+            return self.default_avatar_preset()
         if not self._working.avatar.enabled:
             return "circle"
         gender = (self._working.personality.gender or "neutral").lower()
@@ -1051,6 +1067,10 @@ class SetupWizardController:
         valid = {pid for pid, _l, _d, _g in self.AVATAR_PRESETS}
         if preset_id not in valid:
             preset_id = "neutral"
+
+        # Record that the user has made an explicit avatar choice so the wizard
+        # stops defaulting to the friendly first character on subsequent renders.
+        self._avatar_preset_explicit = True
 
         if preset_id == "circle":
             self._working.avatar.enabled = False

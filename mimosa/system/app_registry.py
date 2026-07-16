@@ -66,6 +66,44 @@ _FIELD_CODE_RE = re.compile(r"%[fFuUdDnNickvm]")
 #: Minimum similarity (0..1) for a fuzzy match to be considered at all.
 DEFAULT_MATCH_THRESHOLD = 0.6
 
+# Common spoken app names that don't match .desktop Name fields directly.
+# Maps a normalised spoken name to a list of app-id substrings (most preferred
+# first). Used as a fallback when the standard fuzzy matcher scores below
+# threshold.
+_COMMON_ALIASES: dict[str, list[str]] = {
+    "file manager": ["dolphin", "nautilus", "thunar", "nemo", "pcmanfm"],
+    "files": ["dolphin", "nautilus", "thunar", "nemo", "pcmanfm"],
+    "terminal": ["konsole", "gnome-terminal", "xterm", "tilix", "alacritty", "kitty"],
+    "text editor": ["kate", "gedit", "geany", "mousepad", "pluma", "xed"],
+    "editor": ["kate", "gedit", "geany", "mousepad", "pluma", "xed"],
+    "browser": ["firefox", "chromium", "brave", "google-chrome"],
+    "web browser": ["firefox", "chromium", "brave", "google-chrome"],
+    "email": ["thunderbird", "evolution", "kmail", "geary"],
+    "mail": ["thunderbird", "evolution", "kmail", "geary"],
+    "calculator": ["kcalc", "gnome-calculator", "galculator"],
+    "image viewer": ["gwenview", "eog", "shotwell", "ristretto"],
+    "photo viewer": ["gwenview", "eog", "shotwell", "ristretto"],
+    "music player": ["elisa", "rhythmbox", "clementine", "audacious", "amarok"],
+    "video player": ["vlc", "mpv", "totem", "dragon"],
+    "media player": ["vlc", "mpv", "totem", "dragon"],
+    "system settings": ["systemsettings", "gnome-control-center"],
+    "settings": ["systemsettings", "gnome-control-center"],
+    "archive manager": ["ark", "file-roller", "engrampa"],
+    "screenshot": ["spectacle", "gnome-screenshot", "flameshot"],
+    "pdf viewer": ["okular", "evince", "mupdf"],
+    "document viewer": ["okular", "evince"],
+    "office": ["libreoffice"],
+    "word processor": ["libreoffice", "abiword"],
+    "spreadsheet": ["libreoffice-calc", "gnumeric"],
+    "presentation": ["libreoffice-impress"],
+    "disk usage": ["filelight", "baobab"],
+    "task manager": ["ksysguard", "gnome-system-monitor", "htop"],
+    "process manager": ["ksysguard", "gnome-system-monitor"],
+    "software center": ["discover", "gnome-software"],
+    "app store": ["discover", "gnome-software"],
+    "package manager": ["discover", "gnome-software", "synaptic"],
+}
+
 
 @dataclass
 class AppEntry:
@@ -368,6 +406,35 @@ class AppRegistry:
         ranked = self.rank(query, limit=1)
         if ranked and ranked[0][1] >= self.match_threshold:
             return ranked[0][0]
+        # Fuzzy match failed -- fall back to common KDE/GNOME spoken aliases
+        # (e.g. "file manager" -> Dolphin/Nautilus) before giving up.
+        return self._find_by_alias(query)
+
+    def _find_by_alias(self, query: str) -> Optional[AppEntry]:
+        """Resolve common spoken names ("file manager") to an installed app.
+
+        Looks ``query`` up in :data:`_COMMON_ALIASES`; for a match, walks the
+        prioritised list of binary/app-id tokens and returns the first installed
+        app whose ``app_id`` (or exec command) contains that token. Returns
+        ``None`` when the query is not a known alias or nothing is installed.
+        """
+        normalised = (query or "").strip().lower()
+        if not normalised:
+            return None
+        candidates = _COMMON_ALIASES.get(normalised)
+        if not candidates:
+            return None
+        catalog = self._ensure_loaded()
+        for token in candidates:
+            # Direct app_id hit (fast path).
+            entry = catalog.get(token)
+            if entry is not None:
+                return entry
+            # Otherwise scan for an entry whose app_id or exec contains the token.
+            token_l = token.lower()
+            for app in catalog.values():
+                if token_l in app.app_id.lower() or token_l in app.exec_command.lower():
+                    return app
         return None
 
     def rank(self, query: str, *, limit: int = 5) -> List[Tuple[AppEntry, float]]:

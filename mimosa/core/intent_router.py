@@ -193,6 +193,34 @@ _SYSTEM_PATTERNS = [
     r"\b(battery|charge level|how much (battery|charge|power))\b",
 ]
 
+# Personal-preference / identity patterns. These catch utterances that set or
+# update something about the user (name, preferences, feelings) so they are
+# handled by the conversational QuestionSkill rather than misrouted to the
+# ApplicationSkill by the LLM or a loose heuristic.
+_PERSONAL_PATTERNS = [
+    r"\bcall me\b",
+    r"\bmy name is\b",
+    r"\bremember (that )?my\b",
+    r"\bremember (that )?i\b",
+    r"\bi('m| am)\s+(called|named|known as)\b",
+    r"\bprefer to be called\b",
+    r"\bjust call me\b",
+    r"\bplease call me\b",
+]
+
+# First-person multi-clause statements ("I think we need to..., Also, call me...")
+# are conversational, not commands. Route them to the question skill before the
+# LLM can misclassify them as application intent.
+_CONVERSATIONAL_PATTERNS = [
+    r"^i\b.+(,\s*(also|and|but|or)\b|;\s*\w)",   # "I think..., also..."
+    r"^(i think|i feel|i believe|i need|i want|i'd like|i would like)\b",
+    r"^(we need|we should|we could|we might)\b",
+]
+
+#: Personal-identity utterances are conversational; they map to the question
+#: skill (no dedicated skill needed).
+INTENT_PERSONAL = INTENT_QUESTION
+
 # Application launch/control patterns (M2.2). These catch app commands so they
 # route locally to the ApplicationSkill. They run after file patterns (so
 # "open my notes file" stays a file op) and after system patterns.
@@ -465,6 +493,15 @@ class IntentRouter:
         # because some of these ("what are you working on?") end in a question.
         if _matches_any(lowered, _TASK_PATTERNS):
             return IntentClassification(INTENT_TASK, 0.9, source="heuristic")
+        # Personal-identity / preference statements ("call me Hank", "my name
+        # is ...") are conversational -- route them to the question skill so the
+        # ApplicationSkill never mistakes the whole sentence for an app name.
+        if _matches_any(lowered, _PERSONAL_PATTERNS):
+            return IntentClassification(INTENT_QUESTION, 0.9, source="heuristic")
+        # First-person multi-clause statements ("I think we need to..., also...")
+        # are conversational, not commands. Guard them before the app patterns.
+        if _matches_any(lowered, _CONVERSATIONAL_PATTERNS):
+            return IntentClassification(INTENT_QUESTION, 0.8, source="heuristic")
         if _matches_any(lowered, _APP_PATTERNS):
             return IntentClassification(INTENT_APPLICATION, 0.9, source="heuristic")
         if _matches_any(lowered, _GREETING_PATTERNS):
@@ -514,7 +551,13 @@ class IntentRouter:
             "You are an intent classifier for a voice assistant. Classify the "
             "user's message into exactly one of these intents: "
             f"{', '.join(SUPPORTED_INTENTS)}. "
-            "Use 'question' for general knowledge or open-ended queries. "
+            "Use 'application' ONLY when the user explicitly wants to open, close, "
+            "launch, or query a specific installed GUI application (e.g. 'open Firefox', "
+            "'close the music player'). Personal phrases like 'call me [name]', "
+            "'my name is', or general statements beginning with 'I think' are NOT "
+            "application intents -- classify them as 'question'. "
+            "Use 'question' for general knowledge, open-ended queries, personal "
+            "preferences, and anything not clearly matching another intent. "
             "Respond with ONLY a compact JSON object of the form "
             '{"intent": "<intent>", "confidence": <0..1>} and nothing else.'
         )

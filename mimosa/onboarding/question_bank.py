@@ -81,7 +81,11 @@ QUESTION_BANK: Tuple[Topic, ...] = (
             ),
             Question(
                 id="intro_about",
-                text="Tell me a bit about yourself — whatever comes to mind.",
+                text=(
+                    "Tell me a bit about yourself — whatever comes to mind. "
+                    "e.g. your name, what you do for work, things you enjoy — "
+                    "whatever feels relevant."
+                ),
                 follow_ups=(
                     "Oh, I'd love to hear more about that!",
                     "That's interesting — what else should I know about you?",

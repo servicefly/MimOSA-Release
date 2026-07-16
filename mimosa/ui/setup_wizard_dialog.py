@@ -647,8 +647,8 @@ if HAS_GTK:
                 self._voice_status.set_text("")
             else:
                 self._voice_status.set_text(
-                    "Couldn't play a sample here (voice model or audio output "
-                    "unavailable). The voice will still work once set up.")
+                    "Voice samples can't be played during setup — your chosen "
+                    "voice will work normally once running.")
             return False  # one-shot idle callback
 
         # -- avatar step (custom UI: one-click preset picker) --------------
@@ -667,6 +667,12 @@ if HAS_GTK:
 
             self._avatar_radios = {}
             current = self._controller.get_selected_avatar_preset()
+            # Ensure the pre-selected default (a friendly character, not the
+            # classic circle) is actually applied to the working config, so a
+            # user who accepts the default still ends up with a character avatar
+            # after finishing setup. `set_active` runs before `connect` below,
+            # so the toggle handler wouldn't fire for the default otherwise.
+            self._controller.select_avatar_preset(current)
             group_leader = None
             for pid, label, desc in self._controller.avatar_preset_options():
                 radio = Gtk.CheckButton(label=label)
