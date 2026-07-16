@@ -705,7 +705,7 @@ class MimOSAApplication:
             # Make the active visualization explicit in the logs so it's clear
             # whether the character avatar or the classic circle is showing and
             # (when the circle) why (item #12 logging cleanup).
-            av = self.config.avatar
+            av = self.config_manager.get().avatar
             if av.use_circle():
                 reason = "avatar disabled" if not av.enabled else "circle_only tier"
                 logger.info("Visualization: classic listening circle (%s)", reason)
