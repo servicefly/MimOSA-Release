@@ -6,6 +6,19 @@ All notable changes to MimOSA are documented here. The format is based on
 
 For narrative, user-facing release notes see [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
+## [Unreleased]
+
+### Fixed
+
+- **Install on Python 3.12+ (Ubuntu/Kubuntu 24.04)**: openWakeWord declares a
+  mandatory `tflite-runtime` dependency on Linux, but that wheel is only
+  published for CPython ≤ 3.11, so `pip install` aborted on the 24.04 default
+  Python. openWakeWord now installs without `tflite-runtime` (via `--no-deps`
+  in `install.sh`) and MimOSA defaults to the ONNX backend
+  (`onnxruntime`), which works on all supported Python versions. Override with
+  `MIMOSA_WAKEWORD_FRAMEWORK` if you specifically want TFLite. The `voice`/`all`
+  extras now ship `onnxruntime` and version-marker-guard `openwakeword`.
+
 ## [2.0.0-beta] — 2026-07-12 — Avatar Polish Sprint
 
 Polish sprint on top of the v2.0.0-alpha avatar system: 12 UX and robustness

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import io
 import struct
+import sys
+import types
 import wave
 
 import pytest
@@ -174,6 +176,30 @@ class TestWakeWord:
             ww.OpenWakeWord._resolve_builtin_model("hey mimosa")
             == ww.OPENWAKEWORD_DEFAULT_MODEL
         )
+
+    def test_default_inference_framework_is_onnx(self):
+        # tflite-runtime has no wheels for Python 3.12+, so MimOSA must default
+        # openWakeWord to the ONNX backend.
+        assert ww.DEFAULT_INFERENCE_FRAMEWORK == "onnx"
+
+    def test_openwakeword_defaults_to_onnx_backend(self, monkeypatch):
+        # When no framework is given, OpenWakeWord must ask openWakeWord for the
+        # ONNX backend (never tflite, which we do not install on 3.12+).
+        captured = {}
+
+        class _FakeModel:
+            def __init__(self, *args, **kwargs):
+                captured.update(kwargs)
+
+        fake_oww_model = types.ModuleType("openwakeword.model")
+        fake_oww_model.Model = _FakeModel
+        fake_oww_utils = types.ModuleType("openwakeword.utils")
+        fake_oww_utils.download_models = lambda *a, **k: None
+        monkeypatch.setitem(sys.modules, "openwakeword.model", fake_oww_model)
+        monkeypatch.setitem(sys.modules, "openwakeword.utils", fake_oww_utils)
+
+        ww.OpenWakeWord(wake_word="hey jarvis")
+        assert captured.get("inference_framework") == "onnx"
 
     def test_openwakeword_missing_package_raises_wakeworderror(self, monkeypatch):
         # Direct construction surfaces the dependency error when the package is

@@ -39,6 +39,13 @@ logger = logging.getLogger(__name__)
 #: Default human-readable wake phrase.
 DEFAULT_WAKE_WORD = "hey mimosa"
 
+#: Inference backend openWakeWord should use. We default to ONNX (onnxruntime)
+#: rather than TFLite because ``tflite-runtime`` has no wheels for CPython 3.12+
+#: (the default on Ubuntu/Kubuntu 24.04) and MimOSA installs openWakeWord
+#: without it. onnxruntime works on every supported Python version. Override
+#: with the ``MIMOSA_WAKEWORD_FRAMEWORK`` environment variable if needed.
+DEFAULT_INFERENCE_FRAMEWORK = os.getenv("MIMOSA_WAKEWORD_FRAMEWORK", "onnx").strip() or "onnx"
+
 #: openWakeWord ships several free, pre-trained models (no key needed):
 #: ``alexa``, ``hey_mycroft``, ``hey_jarvis``, ``hey_rhasspy``, ``timer`` and
 #: ``weather``. "mimosa" is not yet a bundled model, so we map known phrases to
@@ -197,6 +204,10 @@ class OpenWakeWord(BaseWakeWord):
 
         # Resolve which model(s) to load.
         model_path = model_path or os.getenv("MIMOSA_WAKEWORD_MODEL")
+        # Default to ONNX so we never require tflite-runtime (unavailable on
+        # Python 3.12+). Callers may still pass an explicit framework.
+        if inference_framework is None:
+            inference_framework = DEFAULT_INFERENCE_FRAMEWORK
         kwargs = {}
         if inference_framework:
             kwargs["inference_framework"] = inference_framework

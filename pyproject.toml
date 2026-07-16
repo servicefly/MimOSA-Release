@@ -35,8 +35,18 @@ dependencies = [
 
 [project.optional-dependencies]
 # Full local voice pipeline (wake word + STT + TTS + audio I/O).
+#
+# openWakeWord declares a *mandatory* `tflite-runtime` dependency on Linux, but
+# that wheel is only published for CPython <= 3.11. On Python 3.12+ (the default
+# on Ubuntu/Kubuntu 24.04) pip cannot resolve it and the whole install aborts.
+# openWakeWord runs perfectly on onnxruntime alone, so we:
+#   * pull it via pip only where a tflite-runtime wheel exists (python < 3.12),
+#   * always ship onnxruntime for the ONNX backend, and
+#   * (re)install openWakeWord itself with `--no-deps` from install.sh so it is
+#     present on every Python version without dragging in tflite-runtime.
 voice = [
-    "openwakeword>=0.7,<1.0",
+    "onnxruntime>=1.10,<2",
+    "openwakeword>=0.6,<0.7; python_version < '3.12'",
     "openai-whisper>=20231117",
     "piper-tts>=1.2,<2.0",
     "pyaudio>=0.2.13,<0.3",
@@ -55,9 +65,11 @@ semantic = [
 dev = [
     "pytest>=8.0,<9.0",
 ]
-# Everything (convenience meta-extra).
+# Everything (convenience meta-extra). See the note on the `voice` extra above
+# for why openWakeWord is version-marker-guarded and onnxruntime is explicit.
 all = [
-    "openwakeword>=0.7,<1.0",
+    "onnxruntime>=1.10,<2",
+    "openwakeword>=0.6,<0.7; python_version < '3.12'",
     "openai-whisper>=20231117",
     "piper-tts>=1.2,<2.0",
     "pyaudio>=0.2.13,<0.3",

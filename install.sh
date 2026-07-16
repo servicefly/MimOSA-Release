@@ -75,6 +75,27 @@ fi
 echo ">> Installing MimOSA${EXTRAS:+ with extras $EXTRAS}"
 python -m pip install -e ".${EXTRAS}"
 
+# --- 3a. openWakeWord (without its tflite-runtime dependency) --------------
+# openWakeWord lists `tflite-runtime` as a mandatory Linux dependency, but that
+# wheel is only published for CPython <= 3.11. On Python 3.12+ (Ubuntu/Kubuntu
+# 24.04's default) a normal `pip install openwakeword` aborts the whole install.
+# openWakeWord runs fine on onnxruntime alone, so we install it with --no-deps
+# and provide its real runtime dependencies explicitly (minus tflite-runtime).
+# MimOSA forces the ONNX backend at runtime (see mimosa/voice/wake_word.py).
+if [[ $WITH_VOICE -eq 1 ]]; then
+    echo ">> Installing openWakeWord (ONNX backend, without tflite-runtime)"
+    if ! python -m pip install --no-deps "openwakeword>=0.6,<0.7"; then
+        echo "   ! openWakeWord install failed; MimOSA will use the energy-based" >&2
+        echo "     wake-word fallback. Voice still works." >&2
+    else
+        # openWakeWord's real runtime deps (tflite-runtime intentionally omitted).
+        python -m pip install \
+            "onnxruntime>=1.10,<2" "tqdm>=4.0,<5.0" "scipy>=1.3,<2" \
+            "scikit-learn>=1,<2" "requests>=2.0,<3" \
+            || echo "   ! Some openWakeWord runtime deps failed to install." >&2
+    fi
+fi
+
 # --- 3b. Desktop integration (menu entry + app icon) ----------------------
 # Install a .desktop launcher and the app icon into the per-user XDG data dirs
 # so MimOSA shows up (with its real icon, not a generic placeholder) in the
