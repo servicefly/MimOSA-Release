@@ -51,11 +51,36 @@ raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
 PYCHECK
 
 # --- 2. Create / reuse the virtual environment ----------------------------
+#
+# On Debian/Ubuntu the GTK4 Python bindings (PyGObject / python3-gi) are
+# provided as *system* apt packages, and their typelibs cannot be reliably
+# pip-built inside an isolated venv. If the venv cannot see the system
+# packages, `import gi` fails at runtime and MimOSA silently drops to headless
+# mode -- no window and no setup wizard ever appear. We therefore create the
+# venv with --system-site-packages so the apt-installed GTK4 bindings are
+# visible. pip still installs MimOSA's own dependencies into the venv.
+VENV_OPTS=()
+if [[ $WITH_UI -eq 1 ]]; then
+    VENV_OPTS+=(--system-site-packages)
+fi
+
 if [[ ! -d "$VENV_DIR" ]]; then
-    echo ">> Creating virtual environment in $VENV_DIR"
-    "$PY" -m venv "$VENV_DIR"
+    echo ">> Creating virtual environment in $VENV_DIR ${VENV_OPTS[*]:-}"
+    "$PY" -m venv "${VENV_OPTS[@]}" "$VENV_DIR"
 else
     echo ">> Reusing existing virtual environment in $VENV_DIR"
+    # Repair an existing venv that was created without system site-packages
+    # (older installs) so it can see the system GTK4 bindings. This is what
+    # makes the window/wizard appear on machines upgraded from a broken build.
+    if [[ $WITH_UI -eq 1 && -f "$VENV_DIR/pyvenv.cfg" ]]; then
+        if grep -qi '^include-system-site-packages *= *false' "$VENV_DIR/pyvenv.cfg"; then
+            echo ">> Enabling system site-packages in existing venv (needed for GTK4)"
+            sed -i 's/^include-system-site-packages *= *false/include-system-site-packages = true/I' \
+                "$VENV_DIR/pyvenv.cfg"
+        elif ! grep -qi '^include-system-site-packages' "$VENV_DIR/pyvenv.cfg"; then
+            echo "include-system-site-packages = true" >> "$VENV_DIR/pyvenv.cfg"
+        fi
+    fi
 fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
@@ -219,11 +244,37 @@ install_path_launcher() {
 }
 install_path_launcher || echo "WARNING: PATH setup step failed (non-fatal)." >&2
 
+# --- 3d. Verify the GTK4 desktop UI is actually importable ----------------
+# The most common "it installed but nothing opens" cause is that GTK4/PyGObject
+# is not importable from the venv, so MimOSA silently runs headless (no window,
+# no wizard). Check now and tell the user exactly how to fix it if so.
+GTK_OK=0
+if [[ $WITH_UI -eq 1 ]]; then
+    if python - <<'GTKCHECK' 2>/dev/null
+import gi
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk  # noqa: F401
+raise SystemExit(0)
+GTKCHECK
+    then
+        GTK_OK=1
+        echo ">> GTK4 desktop UI is available (the avatar window + wizard will show)."
+    else
+        echo "" >&2
+        echo "WARNING: GTK4 / PyGObject could not be imported from the venv." >&2
+        echo "         MimOSA will run HEADLESS (no window, no setup wizard)." >&2
+        echo "         Fix it with the system GTK4 bindings, then re-run this script:" >&2
+        echo "           sudo apt-get install -y python3-gi python3-gi-cairo \\" >&2
+        echo "               gir1.2-gtk-4.0 libgtk-4-1" >&2
+        echo "           ./install.sh --with-ui" >&2
+    fi
+fi
+
 # --- 4. Done --------------------------------------------------------------
 cat <<EOF
 
 ============================================================================
- MimOSA installed successfully (release candidate 1.0.0rc2).
+ MimOSA installed successfully (v2.0.0-beta).
 
  To start MimOSA (from any directory -- it's on your PATH now):
      mimosa                # GUI avatar if GTK is available, else headless
